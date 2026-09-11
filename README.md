@@ -20,3 +20,8 @@ cd web && npm run dev
 # Backend
 cd worker && uvicorn app.main:app --reload
 ```
+
+## Deployment
+
+- `web/` auto-deploys to Vercel on every push to `main`.
+- `worker/` deploys manually: `cd worker && fly deploy`.
