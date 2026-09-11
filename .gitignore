@@ -23,5 +23,8 @@ venv/
 .vscode/
 .idea/
 
+# Claude Code local session state
+.claude/
+
 # Fly.io
 fly.toml.bak

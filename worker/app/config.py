@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = ""
     r2_bucket: str = "birdphotos"
 
+    @property
+    def r2_endpoint_url(self) -> str:
+        return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+
     anthropic_api_key: str = ""
 
     # The removable AI-trust layer (see plan: Data Model). Flip to true
