@@ -26,6 +26,7 @@ export async function getGroupDetail(groupId: string) {
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
     .select([
       "bg.id as groupId",
+      "bg.best_shot_override_photo_id as overridePhotoId",
       "p.id as photoId",
       "p.r2_key_medium as mediumKey",
       "p.taken_at as takenAt",
@@ -44,4 +45,27 @@ export async function getGroupDetail(groupId: string) {
     .executeTakeFirst();
 
   return group ?? null;
+}
+
+export async function getGroupPhotos(groupId: string) {
+  return db
+    .selectFrom("photos as p")
+    .select([
+      "p.id as photoId",
+      "p.r2_key_thumb as thumbKey",
+      "p.taken_at as takenAt",
+      "p.sharpness_score as sharpnessScore",
+      "p.exposure_score as exposureScore",
+    ])
+    .where("p.burst_group_id", "=", groupId)
+    .orderBy("p.taken_at", "asc")
+    .execute();
+}
+
+export async function setBestShotOverride(groupId: string, photoId: string | null) {
+  await db
+    .updateTable("burst_groups")
+    .set({ best_shot_override_photo_id: photoId })
+    .where("id", "=", groupId)
+    .execute();
 }

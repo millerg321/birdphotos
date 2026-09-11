@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getGroupDetail } from "@/lib/db/queries";
+import { getGroupDetail, getGroupPhotos } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { formatCamera, formatExposure } from "@/lib/formatExif";
+import { setBestShotOverrideAction } from "@/lib/actions/setBestShotOverride";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
@@ -19,7 +20,16 @@ export default async function GroupDetailPage({
     notFound();
   }
 
-  const mediumUrl = await getSignedImageUrl(group.mediumKey);
+  const photos = await getGroupPhotos(id);
+  const [mediumUrl, filmstrip] = await Promise.all([
+    getSignedImageUrl(group.mediumKey),
+    Promise.all(
+      photos.map(async (photo) => ({
+        ...photo,
+        thumbUrl: await getSignedImageUrl(photo.thumbKey),
+      })),
+    ),
+  ]);
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-10 dark:bg-black">
@@ -78,6 +88,55 @@ export default async function GroupDetailPage({
           </div>
         </dl>
       </div>
+
+      {filmstrip.length > 1 && (
+        <div className="mt-8">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm text-zinc-500">
+              {filmstrip.length} photos in this burst
+            </h2>
+            {group.overridePhotoId !== null && (
+              <form action={setBestShotOverrideAction.bind(null, id, null)}>
+                <button
+                  type="submit"
+                  className="text-sm text-zinc-500 hover:underline"
+                >
+                  Reset to automatic pick
+                </button>
+              </form>
+            )}
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {filmstrip.map((photo) => {
+              const isSelected = photo.photoId === group.photoId;
+              return (
+                <form
+                  key={photo.photoId}
+                  action={setBestShotOverrideAction.bind(null, id, photo.photoId)}
+                >
+                  <button
+                    type="submit"
+                    disabled={isSelected}
+                    className={`overflow-hidden rounded-lg ${
+                      isSelected
+                        ? "ring-2 ring-blue-500"
+                        : "opacity-70 hover:opacity-100"
+                    }`}
+                    title={isSelected ? "Current best shot" : "Set as best shot"}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
+                    <img
+                      src={photo.thumbUrl}
+                      alt=""
+                      className="h-24 w-24 object-cover"
+                    />
+                  </button>
+                </form>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
