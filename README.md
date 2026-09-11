@@ -5,9 +5,9 @@ identification and automatic burst/duplicate detection.
 
 ## Structure
 
-- `web/` — Next.js (TypeScript) frontend, deployed to Vercel
+- `web/` — Next.js (TypeScript) frontend, deployed to Vercel: https://web-gamma-black-17.vercel.app
 - `worker/` — Python (FastAPI) backend: Google Photos import, image scoring, burst
-  grouping, AI species classification, deployed to Fly.io
+  grouping, AI species classification, deployed to Fly.io: https://birdphotos-worker.fly.dev
 
 See `.claude` plan history for the full architecture and implementation plan.
 
