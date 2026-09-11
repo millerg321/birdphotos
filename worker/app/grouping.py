@@ -14,6 +14,18 @@ TIME_WINDOW = timedelta(seconds=90)
 # with more data once Phase 2's full import is running.
 HAMMING_THRESHOLD = 20  # of 64 bits
 
+# Time-only fallback: photos this close together merge regardless of hash
+# distance, on the assumption that a ~5s gap is almost always the same
+# moment even if the subject moved a lot between frames. Added after
+# HAMMING_THRESHOLD=20 alone still left two real burst photos unmerged
+# (their nearest hash-neighbor was 26-40 away) despite sitting only 1-3s
+# from the rest of the sequence. Tradeoff: this bypasses the hash check
+# entirely inside the window, so two genuinely different subjects shot
+# within 5s of each other (e.g. quickly swinging to a different bird)
+# would also merge — judged an acceptable risk against the more common
+# case of under-merging a real rapid-fire sequence.
+TIGHT_TIME_WINDOW = timedelta(seconds=5)
+
 SHARPNESS_WEIGHT = 0.6
 EXPOSURE_WEIGHT = 0.4
 
@@ -42,10 +54,13 @@ class _UnionFind:
 
 
 def group_by_burst(photos: list[PhotoForGrouping]) -> list[list[uuid.UUID]]:
-    """Groups photos into bursts by time proximity AND perceptual-hash
-    similarity — both must hold, not just one (see plan: two distinct
-    bursts of different subjects shot 90s apart must not merge just
-    because they're at the time-window boundary).
+    """Groups photos into bursts. Two photos merge if either:
+    - they're within TIGHT_TIME_WINDOW of each other (time-only fallback
+      for rapid-fire sequences — see TIGHT_TIME_WINDOW), or
+    - they're within TIME_WINDOW AND perceptually similar (both must
+      hold — see plan: two distinct bursts of different subjects shot
+      90s apart must not merge just because they're at the window
+      boundary).
 
     Sliding window: for each photo, compare against subsequent photos
     within TIME_WINDOW (sorted by taken_at, so this is transitive/
@@ -57,9 +72,12 @@ def group_by_burst(photos: list[PhotoForGrouping]) -> list[list[uuid.UUID]]:
 
     for i, photo in enumerate(sorted_photos):
         for other in sorted_photos[i + 1 :]:
-            if other.taken_at - photo.taken_at > TIME_WINDOW:
+            gap = other.taken_at - photo.taken_at
+            if gap > TIME_WINDOW:
                 break
-            if hamming_distance(photo.phash, other.phash) <= HAMMING_THRESHOLD:
+            if gap <= TIGHT_TIME_WINDOW:
+                uf.union(photo.id, other.id)
+            elif hamming_distance(photo.phash, other.phash) <= HAMMING_THRESHOLD:
                 uf.union(photo.id, other.id)
 
     groups: dict[uuid.UUID, list[uuid.UUID]] = {}

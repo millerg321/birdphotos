@@ -52,6 +52,45 @@ class TestGroupByBurst:
         groups = group_by_burst(photos)
         assert len(groups) == 2
 
+    def test_tight_time_window_merges_despite_very_different_hash(self) -> None:
+        """The documented tradeoff of TIGHT_TIME_WINDOW: photos within
+        ~5s merge even if they look nothing alike by hash. Verified
+        against real data — two lone frames in the parakeet burst never
+        got within 26 of any neighbor by hash, but sat 1-3s away in
+        time, so this fallback is what actually unites them (see the
+        dataset-shaped test below)."""
+        photos = [
+            _photo(BASE_TIME, HASH_A),
+            _photo(BASE_TIME + timedelta(seconds=2), HASH_B),
+        ]
+        groups = group_by_burst(photos)
+        assert len(groups) == 1
+
+    def test_just_outside_tight_window_falls_back_to_hash_check(self) -> None:
+        photos = [
+            _photo(BASE_TIME, HASH_A),
+            _photo(BASE_TIME + timedelta(seconds=6), HASH_B),
+        ]
+        groups = group_by_burst(photos)
+        assert len(groups) == 2
+
+    def test_real_dataset_parakeet_stragglers_now_fully_merge(self) -> None:
+        """The exact gap HAMMING_THRESHOLD=20 alone left unfixed: photos
+        at +0/+1/+10s formed one hash-similar cluster, but +9s and +13s
+        never got within 26 of any neighbor by hash despite sitting
+        1-3s away in time. TIGHT_TIME_WINDOW should now unite all 5."""
+        start = datetime(2024, 2, 12, 7, 30, 5)
+        photos = [
+            _photo(start, HASH_A),  # 07:30:05
+            _photo(start + timedelta(seconds=1), HASH_A),  # :06
+            _photo(start + timedelta(seconds=4), HASH_B),  # :09 — the straggler
+            _photo(start + timedelta(seconds=5), HASH_A),  # :10
+            _photo(start + timedelta(seconds=8), HASH_B),  # :13 — the other straggler
+        ]
+        groups = group_by_burst(photos)
+        assert len(groups) == 1
+        assert len(groups[0]) == 5
+
     def test_transitive_chain_stays_one_group(self) -> None:
         """A continuous burst where consecutive frames are similar, even
         if the first and last frame alone would exceed the time window."""
