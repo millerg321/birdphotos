@@ -4,6 +4,10 @@ import { getGroupDetail } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { formatCamera, formatExposure } from "@/lib/formatExif";
 
+// See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
+// static params here anyway, but explicit is safer than relying on that).
+export const dynamic = "force-dynamic";
+
 export default async function GroupDetailPage({
   params,
 }: {

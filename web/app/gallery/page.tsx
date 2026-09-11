@@ -2,6 +2,12 @@ import Link from "next/link";
 import { getGalleryGroups } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 
+// Next can't see the DB query or presigned-URL generation as "dynamic"
+// data (neither is a fetch() call), so without this it gets prerendered
+// once at build time — freezing the photo list and baking in R2 URLs
+// that expire within the hour. Force per-request rendering instead.
+export const dynamic = "force-dynamic";
+
 export default async function GalleryPage() {
   const groups = await getGalleryGroups();
   const cards = await Promise.all(
