@@ -19,9 +19,17 @@ def _jpeg_bytes() -> bytes:
 
 @pytest.fixture
 def fake_r2(monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
+    """In-memory stand-in for R2 (see the same pattern in
+    test_group_bursts.py). Covers both the staging download/cleanup this
+    module does directly and the original/thumb/medium uploads that
+    import_one_photo does internally via app.jobs.import_photo."""
     store: dict[str, bytes] = {}
     monkeypatch.setattr(
         "app.jobs.import_upload.download_bytes", lambda key: store[key]
+    )
+    monkeypatch.setattr(
+        "app.jobs.import_photo.upload_bytes",
+        lambda key, data, content_type: store.__setitem__(key, data),
     )
     deleted: list[str] = []
     monkeypatch.setattr(
