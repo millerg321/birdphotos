@@ -13,12 +13,31 @@ from app.config import settings
 # re-check pass without touching callers.
 CLASSIFICATION_MODEL = "claude-haiku-4-5"
 
-CLASSIFICATION_PROMPT = (
-    "You are helping identify the bird species in this photo for a personal "
-    "birding photo collection. Give up to 3 candidate species, ranked by "
-    "confidence. If you cannot identify a bird in the photo at all, return "
-    "an empty candidates list rather than guessing."
-)
+def build_classification_prompt(location_hint: str | None = None) -> str:
+    """location_hint (e.g. "Borneo", "South Africa") makes a real difference:
+    without it, classification tends to default toward whichever similar-
+    looking species is most common in the model's training data (observed
+    in practice: North American species suggested for UK/Borneo/South
+    African photos). See plan: AI Species Classification / manual location
+    fallback — location_hint should come from the photo's assigned
+    Location.name when set."""
+    location_clause = (
+        f" This photo was taken in {location_hint}. Strongly prefer species "
+        f"that actually occur there over superficially similar-looking "
+        f"species from elsewhere."
+        if location_hint
+        else ""
+    )
+    return (
+        "You are helping identify the bird species in this photo for a personal "
+        f"birding photo collection.{location_clause} Give up to 3 candidate "
+        "species, ranked by confidence. The bird may be a juvenile, or a female "
+        "or male of a species where the sexes look different — base your "
+        "identification on the plumage actually visible rather than assuming "
+        "a typical adult male, and if age or sex affects your reasoning, say so "
+        "in notes. If you cannot identify a bird in the photo at all, return an "
+        "empty candidates list rather than guessing."
+    )
 
 
 class SpeciesCandidate(BaseModel):
@@ -59,6 +78,7 @@ def classify_photo_sync(
     client: anthropic.Anthropic,
     image_bytes: bytes,
     media_type: Literal["image/jpeg", "image/png", "image/gif", "image/webp"] = "image/webp",
+    location_hint: str | None = None,
 ) -> SpeciesClassification:
     """Synchronous single-photo classification — used for the incremental
     path (new imports going forward, see plan). The bulk backlog path
@@ -73,7 +93,7 @@ def classify_photo_sync(
                 "role": "user",
                 "content": [
                     image_block(image_bytes, media_type),
-                    TextBlockParam(type="text", text=CLASSIFICATION_PROMPT),
+                    TextBlockParam(type="text", text=build_classification_prompt(location_hint)),
                 ],
             }
         ],

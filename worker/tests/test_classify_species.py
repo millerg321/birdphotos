@@ -8,14 +8,16 @@ from sqlalchemy.orm import Session
 from app.jobs.classify_species import (
     _groups_needing_classification,
     _slugify,
+    clear_unreviewed_ai_suggestions,
     get_or_create_species,
     ingest_batch_results,
     submit_batch_classification,
 )
+from app.locations import get_or_create_location
 from app.models import BurstGroup, BurstGroupSpecies, Photo, Species
 
 
-def _make_group_with_photo(db: Session) -> BurstGroup:
+def _make_group_with_photo(db: Session, location_id: uuid.UUID | None = None) -> BurstGroup:
     group = BurstGroup()
     db.add(group)
     db.flush()
@@ -25,6 +27,7 @@ def _make_group_with_photo(db: Session) -> BurstGroup:
         r2_key_thumb="t",
         r2_key_medium="m",
         taken_at=datetime(2024, 1, 1),
+        location_id=location_id,
     )
     db.add(photo)
     db.flush()
@@ -107,6 +110,139 @@ class TestSubmitBatchClassification:
         assert batch_id == "batch_123"
         call_kwargs = mock_client.messages.batches.create.call_args.kwargs
         assert len(call_kwargs["requests"]) == 2
+
+    def test_includes_location_name_in_prompt_when_photo_has_one(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        location = get_or_create_location(db, "Borneo", 1.0, 114.0)
+        _make_group_with_photo(db, location_id=location.id)
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        mock_client = MagicMock()
+        mock_client.messages.batches.create.return_value = MagicMock(id="batch_123")
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: mock_client
+        )
+
+        submit_batch_classification(db)
+
+        request = mock_client.messages.batches.create.call_args.kwargs["requests"][0]
+        text_block = request["params"]["messages"][0]["content"][1]
+        assert "Borneo" in text_block["text"]
+
+    def test_group_ids_param_bypasses_already_classified_filter(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        group = _make_group_with_photo(db)
+        species = get_or_create_species(db, "Barn Owl", None)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=group.id,
+                species_id=species.id,
+                source="ai_suggested",
+                status="pending_review",
+                confidence=0.5,
+            )
+        )
+        db.flush()
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        mock_client = MagicMock()
+        mock_client.messages.batches.create.return_value = MagicMock(id="batch_456")
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: mock_client
+        )
+
+        # Without group_ids this group would be skipped (already has a
+        # candidate) — the default backlog filter path.
+        assert submit_batch_classification(db) is None
+
+        batch_id = submit_batch_classification(db, group_ids=[group.id])
+        assert batch_id == "batch_456"
+
+    def test_group_ids_skips_already_confirmed_groups(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        confirmed_group = _make_group_with_photo(db)
+        species = get_or_create_species(db, "Barn Owl", None)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=confirmed_group.id,
+                species_id=species.id,
+                source="ai_suggested",
+                status="confirmed",
+                confidence=0.9,
+            )
+        )
+        db.flush()
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        mock_client = MagicMock()
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: mock_client
+        )
+
+        # Asking to reclassify an already-confirmed group is a no-op:
+        # confirmed is ground truth, and resubmitting would resurrect it
+        # in the review queue alongside its confirmed row.
+        result = submit_batch_classification(db, group_ids=[confirmed_group.id])
+        assert result is None
+        mock_client.messages.batches.create.assert_not_called()
+
+
+class TestClearUnreviewedAiSuggestions:
+    def test_removes_pending_review_rows(self, db: Session) -> None:
+        group = _make_group_with_photo(db)
+        species = get_or_create_species(db, "Barn Owl", None)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=group.id,
+                species_id=species.id,
+                source="ai_suggested",
+                status="pending_review",
+                confidence=0.5,
+            )
+        )
+        db.flush()
+
+        clear_unreviewed_ai_suggestions(db, [group.id])
+
+        remaining = (
+            db.query(BurstGroupSpecies)
+            .filter(BurstGroupSpecies.burst_group_id == group.id)
+            .all()
+        )
+        assert remaining == []
+
+    def test_never_removes_confirmed_rows(self, db: Session) -> None:
+        group = _make_group_with_photo(db)
+        species = get_or_create_species(db, "Barn Owl", None)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=group.id,
+                species_id=species.id,
+                source="ai_suggested",
+                status="confirmed",
+                confidence=0.9,
+            )
+        )
+        db.flush()
+
+        clear_unreviewed_ai_suggestions(db, [group.id])
+
+        remaining = (
+            db.query(BurstGroupSpecies)
+            .filter(BurstGroupSpecies.burst_group_id == group.id)
+            .all()
+        )
+        assert len(remaining) == 1
+        assert remaining[0].status == "confirmed"
 
 
 class TestIngestBatchResults:

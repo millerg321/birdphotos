@@ -5,17 +5,17 @@ from anthropic.types import TextBlockParam
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.classification import (
     CLASSIFICATION_MODEL,
-    CLASSIFICATION_PROMPT,
     SpeciesClassification,
+    build_classification_prompt,
     get_anthropic_client,
     image_block,
 )
-from app.models import BurstGroup, BurstGroupSpecies, Photo, Species
+from app.models import BurstGroup, BurstGroupSpecies, Location, Photo, Species
 from app.storage import download_bytes
 
 # Hand-written rather than derived from SpeciesClassification.model_json_schema():
@@ -91,11 +91,55 @@ def _groups_needing_classification(db: Session) -> list[BurstGroup]:
     )
 
 
-def submit_batch_classification(db: Session) -> str | None:
+def clear_unreviewed_ai_suggestions(db: Session, group_ids: list[uuid.UUID]) -> None:
+    """Deletes 'ai_suggested' candidates for the given groups, but never a
+    'confirmed' row — used before a deliberate reclassification pass (e.g.
+    after assigning locations) so stale suggestions don't linger alongside
+    the new ones. A human's prior confirmation should survive a re-run."""
+    db.execute(
+        delete(BurstGroupSpecies).where(
+            BurstGroupSpecies.burst_group_id.in_(group_ids),
+            BurstGroupSpecies.source == "ai_suggested",
+            BurstGroupSpecies.status != "confirmed",
+        )
+    )
+    db.flush()
+
+
+def submit_batch_classification(
+    db: Session, group_ids: list[uuid.UUID] | None = None
+) -> str | None:
     """One request per burst group (not per photo — see plan: cost
-    control by construction), using each group's best-shot medium
-    image. Returns None if there's nothing new to classify."""
-    groups = _groups_needing_classification(db)
+    control by construction), using each group's best-shot medium image
+    and, when that photo has an assigned Location, the location's name
+    as classification context — verified to materially change results
+    (without it, classification tended toward whichever similar-looking
+    species is most common in the model's training data, e.g. North
+    American species suggested for UK/Borneo/South African photos).
+
+    group_ids: classify exactly these groups, bypassing the "already
+    classified" filter — used for a deliberate reclassification pass
+    (e.g. after assigning locations to existing photos). Groups that
+    already have a 'confirmed' candidate are skipped even here — a
+    human's answer is ground truth, and resubmitting it would just
+    resurrect an already-settled group in the /review queue alongside
+    its confirmed row (hit this exactly while testing the reclassify
+    path). Omit group_ids for the normal incremental/backlog behavior.
+    Returns None if there's nothing to classify.
+    """
+    if group_ids is not None:
+        already_confirmed = select(BurstGroupSpecies.burst_group_id).where(
+            BurstGroupSpecies.status == "confirmed"
+        )
+        groups = list(
+            db.execute(
+                select(BurstGroup).where(
+                    BurstGroup.id.in_(group_ids), BurstGroup.id.not_in(already_confirmed)
+                )
+            ).scalars()
+        )
+    else:
+        groups = _groups_needing_classification(db)
     if not groups:
         return None
 
@@ -105,6 +149,11 @@ def submit_batch_classification(db: Session) -> str | None:
         photo = db.get(Photo, best_shot_id)
         assert photo is not None
         image_bytes = download_bytes(photo.r2_key_medium)
+
+        location_hint = None
+        if photo.location_id is not None:
+            location = db.get(Location, photo.location_id)
+            location_hint = location.name if location is not None else None
 
         requests.append(
             Request(
@@ -117,7 +166,9 @@ def submit_batch_classification(db: Session) -> str | None:
                             "role": "user",
                             "content": [
                                 image_block(image_bytes, "image/webp"),
-                                TextBlockParam(type="text", text=CLASSIFICATION_PROMPT),
+                                TextBlockParam(
+                                    type="text", text=build_classification_prompt(location_hint)
+                                ),
                             ],
                         }
                     ],
