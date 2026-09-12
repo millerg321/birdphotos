@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     ForeignKey,
     Integer,
     PrimaryKeyConstraint,
@@ -92,6 +93,15 @@ class Photo(Base):
     phash: Mapped[str | None] = mapped_column(String)
     sharpness_score: Mapped[float | None]
     exposure_score: Mapped[float | None]
+
+    # Set by a manual group merge (see plan: manual upload / grouping
+    # overrides) and checked by regroup_all, which otherwise recomputes
+    # every group from scratch off phash/time on every run — without this,
+    # a manual merge would silently get re-split apart the next time
+    # someone clicks "Score & group new photos". Mirrors the existing
+    # best_shot_override_photo_id COALESCE pattern: a manual decision here
+    # permanently wins over the algorithm until explicitly reset.
+    grouping_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     import_status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

@@ -1,10 +1,12 @@
+from uuid import UUID
+
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
 from app.db import get_db
-from app.jobs.group_bursts import backfill_scores, regroup_all
+from app.jobs.group_bursts import backfill_scores, merge_groups, regroup_all
 from app.jobs.import_upload import UploadImportResult, import_from_staged_upload
 
 app = FastAPI(title="Bird Photos Worker")
@@ -67,3 +69,30 @@ def run_backfill_and_group(
     groups = regroup_all(db)
     db.commit()
     return BackfillAndGroupResult(scored=scored, groups=groups)
+
+
+class MergeGroupsRequest(BaseModel):
+    into_group_id: UUID
+    from_group_id: UUID
+
+
+class MergeGroupsResult(BaseModel):
+    group_id: UUID
+
+
+@app.post(
+    "/jobs/merge-groups",
+    dependencies=[Depends(require_internal_token)],
+    response_model=MergeGroupsResult,
+)
+def run_merge_groups(
+    request: MergeGroupsRequest,
+    db: Session = Depends(get_db),  # noqa: B008 - idiomatic FastAPI dependency injection
+) -> MergeGroupsResult:
+    """Manual merge trigger for the group-detail page's "merge with
+    previous/next group" action (see plan: manual upload / grouping
+    overrides) — for bursts the automatic threshold-based grouping
+    splits apart despite being the same real burst."""
+    group_id = merge_groups(db, request.into_group_id, request.from_group_id)
+    db.commit()
+    return MergeGroupsResult(group_id=group_id)

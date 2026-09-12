@@ -1,10 +1,16 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getConfirmedCandidate, getGroupDetail, getGroupPhotos } from "@/lib/db/queries";
+import {
+  getAdjacentGroupIds,
+  getConfirmedCandidate,
+  getGroupDetail,
+  getGroupPhotos,
+} from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { formatCamera, formatExposure } from "@/lib/formatExif";
 import { setBestShotOverrideAction } from "@/lib/actions/setBestShotOverride";
 import { reopenForReviewAction } from "@/lib/actions/reviewSpecies";
+import { mergeGroupsAction } from "@/lib/actions/mergeGroups";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
@@ -23,7 +29,7 @@ export default async function GroupDetailPage({
   }
 
   const photos = await getGroupPhotos(id);
-  const [mediumUrl, filmstrip, confirmedCandidate] = await Promise.all([
+  const [mediumUrl, filmstrip, confirmedCandidate, adjacent] = await Promise.all([
     getSignedImageUrl(group.mediumKey),
     Promise.all(
       photos.map(async (photo) => ({
@@ -32,6 +38,12 @@ export default async function GroupDetailPage({
       })),
     ),
     getConfirmedCandidate(id),
+    getAdjacentGroupIds(id, group.takenAt),
+  ]);
+
+  const [prevGroupPhotoCount, nextGroupPhotoCount] = await Promise.all([
+    adjacent.prevGroupId ? getGroupPhotos(adjacent.prevGroupId).then((p) => p.length) : 0,
+    adjacent.nextGroupId ? getGroupPhotos(adjacent.nextGroupId).then((p) => p.length) : 0,
   ]);
 
   return (
@@ -180,6 +192,38 @@ export default async function GroupDetailPage({
                 </form>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {(adjacent.prevGroupId !== null || adjacent.nextGroupId !== null) && (
+        <div className="mt-8 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <h2 className="mb-2 text-sm text-zinc-500">
+            Same burst, split apart by grouping?
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {adjacent.prevGroupId !== null && (
+              <form action={mergeGroupsAction.bind(null, id, adjacent.prevGroupId)}>
+                <button
+                  type="submit"
+                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                >
+                  Merge with previous group ({prevGroupPhotoCount} photo
+                  {prevGroupPhotoCount === 1 ? "" : "s"})
+                </button>
+              </form>
+            )}
+            {adjacent.nextGroupId !== null && (
+              <form action={mergeGroupsAction.bind(null, id, adjacent.nextGroupId)}>
+                <button
+                  type="submit"
+                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                >
+                  Merge with next group ({nextGroupPhotoCount} photo
+                  {nextGroupPhotoCount === 1 ? "" : "s"})
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

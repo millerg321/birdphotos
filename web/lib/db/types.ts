@@ -95,6 +95,7 @@ export interface Photos {
   google_photos_id: string | null;
   gps_lat: number | null;
   gps_lng: number | null;
+  grouping_locked: boolean;
   height: number | null;
   id: string;
   import_source: string;

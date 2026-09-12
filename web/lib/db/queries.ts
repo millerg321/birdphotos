@@ -63,6 +63,36 @@ export async function getGroupPhotos(groupId: string) {
     .execute();
 }
 
+// Chronological neighbors by effective best-shot taken_at — the anchor
+// used to drive the group detail page's "merge with previous/next group"
+// action (see plan: manual upload / grouping overrides). A group has no
+// stored taken_at of its own, so this reuses the same effective-best-shot
+// join as everywhere else rather than aggregating min(taken_at) per group.
+export async function getAdjacentGroupIds(groupId: string, takenAt: Date) {
+  const [prev, next] = await Promise.all([
+    db
+      .selectFrom("burst_groups as bg")
+      .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
+      .select(["bg.id as groupId"])
+      .where("p.taken_at", "<", takenAt)
+      .where("bg.id", "!=", groupId)
+      .orderBy("p.taken_at", "desc")
+      .limit(1)
+      .executeTakeFirst(),
+    db
+      .selectFrom("burst_groups as bg")
+      .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
+      .select(["bg.id as groupId"])
+      .where("p.taken_at", ">", takenAt)
+      .where("bg.id", "!=", groupId)
+      .orderBy("p.taken_at", "asc")
+      .limit(1)
+      .executeTakeFirst(),
+  ]);
+
+  return { prevGroupId: prev?.groupId ?? null, nextGroupId: next?.groupId ?? null };
+}
+
 export async function setBestShotOverride(groupId: string, photoId: string | null) {
   await db
     .updateTable("burst_groups")
