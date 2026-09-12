@@ -22,7 +22,20 @@ async function callWorker(path: string, body: Record<string, string>): Promise<u
   });
 
   if (!response.ok) {
-    throw new Error(`Worker request to ${path} failed: ${response.status} ${await response.text()}`);
+    const text = await response.text();
+    // FastAPI's HTTPException responses are {"detail": "..."} — prefer
+    // that clean message when present (e.g. set-group-location's "place
+    // not found") over the surrounding JSON noise.
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed.detail === "string") {
+        detail = parsed.detail;
+      }
+    } catch {
+      // Not JSON — fall back to the raw response text.
+    }
+    throw new Error(`Worker request to ${path} failed: ${response.status} ${detail}`);
   }
 
   return response.json();
@@ -76,4 +89,28 @@ export async function deleteGroupAction(groupId: string): Promise<void> {
   await callWorker("/jobs/delete-group", { group_id: groupId });
   revalidatePath("/gallery");
   redirect("/gallery");
+}
+
+export interface SetGroupLocationResult {
+  locationId: string;
+  name: string;
+}
+
+// Geocodes a free-text place name via the worker (Nominatim — see
+// worker/app/locations.py) and assigns it to every photo in the group.
+// Meant to be set before running classification, since location context
+// materially changes AI species suggestions — this is what lets a
+// manually-uploaded photo with no GPS EXIF get the same benefit a
+// GPS-tagged one already does.
+export async function setGroupLocationAction(
+  groupId: string,
+  placeName: string,
+): Promise<SetGroupLocationResult> {
+  await requireSession();
+  const result = (await callWorker("/jobs/set-group-location", {
+    group_id: groupId,
+    place_name: placeName,
+  })) as { location_id: string; name: string };
+  revalidatePath(`/groups/${groupId}`);
+  return { locationId: result.location_id, name: result.name };
 }

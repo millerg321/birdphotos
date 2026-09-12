@@ -19,6 +19,7 @@ import {
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 import { SubmitButton } from "./SubmitButton";
 import { ConfirmButton } from "./ConfirmButton";
+import { SetLocationForm } from "./SetLocationForm";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
@@ -160,9 +161,14 @@ export default async function GroupDetailPage({
           <div>
             <dt className="text-zinc-500">Location</dt>
             <dd className="text-black dark:text-zinc-50">
-              {group.gpsLat !== null && group.gpsLng !== null
-                ? `${group.gpsLat.toFixed(5)}, ${group.gpsLng.toFixed(5)}`
-                : "—"}
+              {group.gpsLat !== null && group.gpsLng !== null ? (
+                `${group.gpsLat.toFixed(5)}, ${group.gpsLng.toFixed(5)}`
+              ) : (
+                <>
+                  <span>{group.locationName ?? "—"}</span>
+                  <SetLocationForm groupId={id} />
+                </>
+              )}
             </dd>
           </div>
         </dl>

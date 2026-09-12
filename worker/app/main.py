@@ -1,12 +1,12 @@
 from uuid import UUID
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
 from app.db import get_db
-from app.jobs.classify_species import classify_new_groups_sync
+from app.jobs.classify_species import classify_new_groups_sync, clear_unreviewed_ai_suggestions
 from app.jobs.group_bursts import (
     backfill_scores,
     delete_group,
@@ -16,6 +16,7 @@ from app.jobs.group_bursts import (
     remove_photo_from_group,
 )
 from app.jobs.import_upload import UploadImportResult, import_from_staged_upload
+from app.locations import set_group_location
 from app.storage import delete_object
 
 app = FastAPI(title="Bird Photos Worker")
@@ -197,3 +198,51 @@ def run_delete_group(
     for key in keys:
         delete_object(key)
     return DeleteGroupResult(deleted=True)
+
+
+class SetGroupLocationRequest(BaseModel):
+    group_id: UUID
+    place_name: str
+
+
+class SetGroupLocationResult(BaseModel):
+    location_id: UUID
+    name: str
+    lat: float
+    lng: float
+
+
+@app.post(
+    "/jobs/set-group-location",
+    dependencies=[Depends(require_internal_token)],
+    response_model=SetGroupLocationResult,
+)
+def run_set_group_location(
+    request: SetGroupLocationRequest,
+    db: Session = Depends(get_db),  # noqa: B008 - idiomatic FastAPI dependency injection
+) -> SetGroupLocationResult:
+    """Manually assigns a location to every photo in a group, geocoded
+    from a free-text place name via Nominatim (see plan: Manual Location
+    Fallback) — meant to be set before running classification, since
+    location materially changes AI species suggestions (see plan: AI
+    Species Classification). Also clears this group's own unreviewed AI
+    suggestions (never a confirmed one) so a later classify run treats
+    it as unclassified again, rather than leaving stale pre-location
+    suggestions sitting alongside nothing new."""
+    try:
+        location = set_group_location(db, request.group_id, request.place_name)
+    except ValueError as e:
+        # An unrecognized place name is a normal, expected user-input
+        # outcome (unlike the other endpoints' ValueErrors, which mostly
+        # guard against races/bugs) — surface the real reason via
+        # HTTPException's detail rather than a generic 500, so the web
+        # app's inline error actually tells the user something useful.
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    clear_unreviewed_ai_suggestions(db, [request.group_id])
+    db.commit()
+    return SetGroupLocationResult(
+        location_id=location.id,
+        name=location.name,
+        lat=location.center_lat,
+        lng=location.center_lng,
+    )

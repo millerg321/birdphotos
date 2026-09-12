@@ -46,3 +46,11 @@ def test_delete_photo_requires_internal_token() -> None:
 def test_delete_group_requires_internal_token() -> None:
     response = client.post("/jobs/delete-group", json={"group_id": str(uuid4())})
     assert response.status_code == 401
+
+
+def test_set_group_location_requires_internal_token() -> None:
+    response = client.post(
+        "/jobs/set-group-location",
+        json={"group_id": str(uuid4()), "place_name": "London, UK"},
+    )
+    assert response.status_code == 401

@@ -25,6 +25,7 @@ export async function getGroupDetail(groupId: string) {
   const group = await db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
+    .leftJoin("locations as l", "l.id", "p.location_id")
     .select([
       "bg.id as groupId",
       "bg.best_shot_override_photo_id as overridePhotoId",
@@ -41,6 +42,7 @@ export async function getGroupDetail(groupId: string) {
       "p.gps_lng as gpsLng",
       "p.width",
       "p.height",
+      "l.name as locationName",
     ])
     .where("bg.id", "=", groupId)
     .executeTakeFirst();
