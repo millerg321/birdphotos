@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const client = new S3Client({
@@ -20,4 +20,19 @@ export function getSignedImageUrl(key: string): Promise<string> {
     Key: key,
   });
   return getSignedUrl(client, command, { expiresIn: ONE_HOUR_SECONDS });
+}
+
+const FIFTEEN_MINUTES_SECONDS = 15 * 60;
+
+// Manual upload (see plan): the browser PUTs the file directly to this
+// URL, bypassing our server entirely — Vercel's serverless functions
+// have a hard 4.5MB request body limit that most real bird photos
+// exceed, so the bytes can never pass through a Next.js route/action.
+export function getSignedUploadUrl(key: string, contentType: string): Promise<string> {
+  const command = new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+  return getSignedUrl(client, command, { expiresIn: FIFTEEN_MINUTES_SECONDS });
 }

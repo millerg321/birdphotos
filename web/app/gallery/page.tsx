@@ -19,9 +19,17 @@ export default async function GalleryPage() {
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-10 dark:bg-black">
-      <h1 className="mb-6 text-2xl font-semibold text-black dark:text-zinc-50">
-        Gallery
-      </h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
+          Gallery
+        </h1>
+        <Link
+          href="/upload"
+          className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+        >
+          Upload photos
+        </Link>
+      </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {cards.map((card) => (
           <Link

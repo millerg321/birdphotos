@@ -25,3 +25,7 @@ def upload_bytes(key: str, data: bytes, content_type: str) -> None:
 def download_bytes(key: str) -> bytes:
     response = get_r2_client().get_object(Bucket=settings.r2_bucket, Key=key)
     return response["Body"].read()  # type: ignore[no-any-return]
+
+
+def delete_object(key: str) -> None:
+    get_r2_client().delete_object(Bucket=settings.r2_bucket, Key=key)
