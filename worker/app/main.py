@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
 from app.db import get_db
+from app.jobs.group_bursts import backfill_scores, regroup_all
 from app.jobs.import_upload import UploadImportResult, import_from_staged_upload
 
 app = FastAPI(title="Bird Photos Worker")
@@ -39,3 +40,30 @@ def import_from_upload(
     payload only — the actual image bytes never pass through this
     request, sidestepping Vercel's 4.5MB serverless body limit."""
     return [import_from_staged_upload(db, key) for key in request.r2_keys]
+
+
+class BackfillAndGroupResult(BaseModel):
+    scored: int
+    groups: int
+
+
+@app.post(
+    "/jobs/backfill-and-group",
+    dependencies=[Depends(require_internal_token)],
+    response_model=BackfillAndGroupResult,
+)
+def run_backfill_and_group(
+    db: Session = Depends(get_db),  # noqa: B008 - idiomatic FastAPI dependency injection
+) -> BackfillAndGroupResult:
+    """Manual trigger for the same scoring/grouping pass scripts/backfill_and_group.py
+    runs — deliberately not part of the upload flow itself (see plan:
+    manual upload). regroup_all rescans every scored photo rather than
+    just what's new, so running it per-upload would make each upload's
+    response wait on an ever-growing full-library pass; call this
+    endpoint after a batch of uploads instead. May go away if/once
+    uploads get proper incremental grouping."""
+    scored = backfill_scores(db)
+    db.commit()
+    groups = regroup_all(db)
+    db.commit()
+    return BackfillAndGroupResult(scored=scored, groups=groups)

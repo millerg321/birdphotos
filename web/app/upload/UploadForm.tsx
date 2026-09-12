@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getUploadUrlAction, processUploadsAction } from "@/lib/actions/upload";
+import { getUploadUrlAction, processUploadsAction, rescanAction } from "@/lib/actions/upload";
 
 interface FileStatus {
   name: string;
@@ -13,6 +13,20 @@ export function UploadForm() {
   const [statuses, setStatuses] = useState<FileStatus[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanResult, setRescanResult] = useState<string | null>(null);
+
+  async function handleRescan() {
+    setRescanning(true);
+    setRescanResult(null);
+    try {
+      const result = await rescanAction();
+      setRescanResult(`Scored ${result.scored}, ${result.groups} burst group(s) total`);
+    } catch (err) {
+      setRescanResult(err instanceof Error ? err.message : "Rescan failed");
+    }
+    setRescanning(false);
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) {
@@ -133,6 +147,25 @@ export function UploadForm() {
       {summary && (
         <p className="text-sm text-zinc-700 dark:text-zinc-300">{summary}</p>
       )}
+
+      <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+        <p className="mb-2 text-xs text-zinc-500">
+          Newly uploaded photos aren&apos;t scored or grouped into bursts until
+          this runs. It rescans the whole library, so run it once after a
+          batch rather than after each photo.
+        </p>
+        <button
+          type="button"
+          onClick={handleRescan}
+          disabled={rescanning}
+          className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+        >
+          {rescanning ? "Scoring & grouping…" : "Score & group new photos"}
+        </button>
+        {rescanResult && (
+          <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">{rescanResult}</p>
+        )}
+      </div>
     </div>
   );
 }

@@ -66,3 +66,29 @@ export async function processUploadsAction(r2Keys: string[]): Promise<ProcessUpl
       .map((r) => ({ r2Key: r.r2_key, error: r.error! })),
   };
 }
+
+export interface RescanResult {
+  scored: number;
+  groups: number;
+}
+
+// Manual trigger only (see plan: manual upload) — scoring/grouping is a
+// full-library rescan, not incremental, so it deliberately doesn't run
+// automatically after every upload. Hit this once after uploading a
+// batch. May go away if/once uploads get proper incremental grouping.
+export async function rescanAction(): Promise<RescanResult> {
+  await requireSession();
+
+  const response = await fetch(`${process.env.WORKER_BASE_URL}/jobs/backfill-and-group`, {
+    method: "POST",
+    headers: { "X-Internal-Token": process.env.INTERNAL_API_TOKEN! },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Worker rescan failed: ${response.status} ${await response.text()}`);
+  }
+
+  const result: RescanResult = await response.json();
+  revalidatePath("/gallery");
+  return result;
+}
