@@ -8,23 +8,32 @@ from app.scoring import hamming_distance
 TIME_WINDOW = timedelta(seconds=90)
 # Tuned against the real local test set, not just the plan's initial ~10
 # guess: a moving subject (e.g. a bird shifting in/out of a nest hole
-# between frames) can push same-burst distances well past 10. 20 merges
-# most real bursts while staying clear of the ~24 floor observed between
-# two genuinely distinct bursts 90s apart in that same test set. Revisit
-# with more data once Phase 2's full import is running.
-HAMMING_THRESHOLD = 20  # of 64 bits
+# between frames) can push same-burst distances well past 10. Raised
+# from 20 to 25 after two manually-uploaded bursts (5 photos over 29s,
+# 3 photos over 31s — deliberate, not rapid-fire shooting) showed
+# same-subject distances up to 34, higher than the ~24 floor the
+# original 20 was tuned to stay clear of between genuinely distinct
+# bursts 90s apart. There's no cutoff that cleanly separates the two
+# cases here — 25 is a judgment call, not a clean fix, and doesn't
+# fully solve it (see TIGHT_TIME_WINDOW and the still-splitting
+# 3-photo case in test_grouping.py). Revisit with more data once
+# Phase 2's full import is running.
+HAMMING_THRESHOLD = 25  # of 64 bits
 
 # Time-only fallback: photos this close together merge regardless of hash
-# distance, on the assumption that a ~5s gap is almost always the same
-# moment even if the subject moved a lot between frames. Added after
-# HAMMING_THRESHOLD=20 alone still left two real burst photos unmerged
-# (their nearest hash-neighbor was 26-40 away) despite sitting only 1-3s
-# from the rest of the sequence. Tradeoff: this bypasses the hash check
+# distance, on the assumption that a short gap is almost always the same
+# moment even if the subject moved a lot between frames. Originally 5s,
+# added after HAMMING_THRESHOLD=20 alone still left two real burst
+# photos unmerged (their nearest hash-neighbor was 26-40 away) despite
+# sitting only 1-3s from the rest of the sequence. Raised to 15s
+# alongside the HAMMING_THRESHOLD bump above, to bridge same-burst
+# frames shot several seconds apart (not just rapid-fire) whose hash
+# distance still exceeds 25. Tradeoff: this bypasses the hash check
 # entirely inside the window, so two genuinely different subjects shot
-# within 5s of each other (e.g. quickly swinging to a different bird)
+# within 15s of each other (e.g. quickly swinging to a different bird)
 # would also merge — judged an acceptable risk against the more common
-# case of under-merging a real rapid-fire sequence.
-TIGHT_TIME_WINDOW = timedelta(seconds=5)
+# case of under-merging a real, deliberately-paced burst.
+TIGHT_TIME_WINDOW = timedelta(seconds=15)
 
 SHARPNESS_WEIGHT = 0.6
 EXPOSURE_WEIGHT = 0.4

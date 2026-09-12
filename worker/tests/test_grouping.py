@@ -69,7 +69,7 @@ class TestGroupByBurst:
     def test_just_outside_tight_window_falls_back_to_hash_check(self) -> None:
         photos = [
             _photo(BASE_TIME, HASH_A),
-            _photo(BASE_TIME + timedelta(seconds=6), HASH_B),
+            _photo(BASE_TIME + timedelta(seconds=16), HASH_B),
         ]
         groups = group_by_burst(photos)
         assert len(groups) == 2
@@ -106,6 +106,38 @@ class TestGroupByBurst:
     def test_single_photo_is_its_own_group(self) -> None:
         groups = group_by_burst([_photo(BASE_TIME, HASH_A)])
         assert groups == [[groups[0][0]]]
+
+    def test_real_manual_upload_burst_fully_merges_with_wider_thresholds(self) -> None:
+        """The 5-photo burst that motivated raising HAMMING_THRESHOLD to 25
+        and TIGHT_TIME_WINDOW to 15s: a deliberately-paced (not rapid-fire)
+        sequence over 29s, with same-subject hash distances up to 32 that
+        HAMMING_THRESHOLD=20 alone couldn't bridge. Real hashes/timestamps
+        from the manual-upload grouping investigation."""
+        photos = [
+            _photo(datetime(2020, 12, 31, 9, 49, 48), "c64fb913863bce24"),
+            _photo(datetime(2020, 12, 31, 9, 49, 49), "c76bb903822bec3c"),
+            _photo(datetime(2020, 12, 31, 9, 49, 58), "9652e969fcec24a1"),
+            _photo(datetime(2020, 12, 31, 9, 50, 13), "90638a699f976798"),
+            _photo(datetime(2020, 12, 31, 9, 50, 17), "907389699e4b6e9c"),
+        ]
+        groups = group_by_burst(photos)
+        assert len(groups) == 1
+        assert len(groups[0]) == 5
+
+    def test_real_manual_upload_burst_still_splits_on_a_late_outlier(self) -> None:
+        """The known-remaining gap from the same investigation: this
+        3-photo burst's third frame sits 30-31s from the other two (past
+        TIGHT_TIME_WINDOW) with hash distances of 28 and 34 (past even the
+        raised HAMMING_THRESHOLD=25), so it still splits off. Documents
+        the limit of this tuning rather than a regression to fix here."""
+        photos = [
+            _photo(datetime(2021, 2, 4, 8, 56, 49), "c7ec5cb273029b25"),
+            _photo(datetime(2021, 2, 4, 8, 56, 50), "9fe85eb43106836d"),
+            _photo(datetime(2021, 2, 4, 8, 57, 20), "c5d3cd6cf20a1e98"),
+        ]
+        groups = group_by_burst(photos)
+        assert len(groups) == 2
+        assert {len(g) for g in groups} == {2, 1}
 
     def test_two_real_bursts_from_the_test_dataset(self) -> None:
         """Mirrors the actual 07:28:16-07:28:35 and 07:30:05-07:30:13
