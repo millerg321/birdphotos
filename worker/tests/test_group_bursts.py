@@ -224,14 +224,38 @@ class TestMergeGroups:
                 db, into_group_id=photo_a.burst_group_id, from_group_id=photo_a.burst_group_id
             )
 
-    def test_rejects_an_empty_source_group(self, db: Session) -> None:
+    def test_an_empty_source_group_is_a_no_op(self, db: Session) -> None:
+        """Not an error case: this is what a duplicate merge submission
+        (e.g. a double-click) looks like on its second, redundant call —
+        see the real 500 this caused in production before this fix."""
         photo_a = _make_photo(db, datetime(2024, 1, 1, 12, 0, 0), "a")
         empty_group = BurstGroup()
         db.add(empty_group)
         db.flush()
 
-        with pytest.raises(ValueError):
-            merge_groups(db, into_group_id=photo_a.burst_group_id, from_group_id=empty_group.id)
+        result = merge_groups(
+            db, into_group_id=photo_a.burst_group_id, from_group_id=empty_group.id
+        )
+
+        assert result == photo_a.burst_group_id
+
+    def test_a_repeated_merge_of_the_same_pair_does_not_error(
+        self, db: Session, fake_r2: dict[str, bytes]
+    ) -> None:
+        """The exact production failure: the same merge submitted twice
+        in quick succession. The first call does the real work; the
+        second must be a harmless no-op, not a 500."""
+        fake_r2["a"] = _jpeg(128)
+        fake_r2["b"] = _jpeg(200)
+        photo_a = _make_photo(db, datetime(2024, 1, 1, 12, 0, 0), "a")
+        photo_b = _make_photo(db, datetime(2024, 1, 1, 12, 0, 40), "b")
+        into_group_id, from_group_id = photo_a.burst_group_id, photo_b.burst_group_id
+        backfill_scores(db)
+
+        merge_groups(db, into_group_id=into_group_id, from_group_id=from_group_id)
+        result = merge_groups(db, into_group_id=into_group_id, from_group_id=from_group_id)
+
+        assert result == into_group_id
 
     def test_reassigns_species_candidates_from_the_deleted_group(
         self, db: Session, fake_r2: dict[str, bytes]

@@ -129,7 +129,11 @@ def merge_groups(db: Session, into_group_id: uuid.UUID, from_group_id: uuid.UUID
         select(Photo).where(Photo.burst_group_id == from_group_id)
     ).scalars().all()
     if not from_photos:
-        raise ValueError("Source group has no photos")
+        # Idempotent no-op rather than an error: a duplicate submission of
+        # the same merge (e.g. a double-click before the UI could disable
+        # the button) racing an already-successful call lands here with
+        # nothing left to do, not a real failure.
+        return into_group_id
 
     for photo in from_photos:
         photo.burst_group_id = into_group_id

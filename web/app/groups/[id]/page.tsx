@@ -12,6 +12,7 @@ import { setBestShotOverrideAction } from "@/lib/actions/setBestShotOverride";
 import { reopenForReviewAction } from "@/lib/actions/reviewSpecies";
 import { mergeGroupsAction } from "@/lib/actions/mergeGroups";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
+import { SubmitButton } from "./SubmitButton";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
@@ -204,24 +205,24 @@ export default async function GroupDetailPage({
           <div className="flex flex-wrap gap-2">
             {adjacent.prevGroupId !== null && (
               <form action={mergeGroupsAction.bind(null, id, adjacent.prevGroupId)}>
-                <button
-                  type="submit"
-                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                <SubmitButton
+                  pendingLabel="Merging…"
+                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
                 >
                   Merge with previous group ({prevGroupPhotoCount} photo
                   {prevGroupPhotoCount === 1 ? "" : "s"})
-                </button>
+                </SubmitButton>
               </form>
             )}
             {adjacent.nextGroupId !== null && (
               <form action={mergeGroupsAction.bind(null, id, adjacent.nextGroupId)}>
-                <button
-                  type="submit"
-                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                <SubmitButton
+                  pendingLabel="Merging…"
+                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
                 >
                   Merge with next group ({nextGroupPhotoCount} photo
                   {nextGroupPhotoCount === 1 ? "" : "s"})
-                </button>
+                </SubmitButton>
               </form>
             )}
           </div>
