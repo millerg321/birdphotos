@@ -29,3 +29,20 @@ def test_merge_groups_requires_internal_token() -> None:
         json={"into_group_id": str(uuid4()), "from_group_id": str(uuid4())},
     )
     assert response.status_code == 401
+
+
+def test_remove_photo_from_group_requires_internal_token() -> None:
+    response = client.post(
+        "/jobs/remove-photo-from-group", json={"photo_id": str(uuid4())}
+    )
+    assert response.status_code == 401
+
+
+def test_delete_photo_requires_internal_token() -> None:
+    response = client.post("/jobs/delete-photo", json={"photo_id": str(uuid4())})
+    assert response.status_code == 401
+
+
+def test_delete_group_requires_internal_token() -> None:
+    response = client.post("/jobs/delete-group", json={"group_id": str(uuid4())})
+    assert response.status_code == 401

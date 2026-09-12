@@ -1,6 +1,8 @@
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.grouping import (
@@ -107,6 +109,23 @@ def regroup_all(db: Session) -> int:
     return len(computed_groups)
 
 
+def _delete_empty_group(db: Session, group: BurstGroup) -> None:
+    """Deletes a burst_groups row that has no photos left. Clears its own
+    best-shot FK columns and removes any species/tags still attached to
+    it first — both carry a NOT NULL FK to burst_groups that would
+    otherwise turn the delete below into a ForeignKeyViolation. Callers
+    that want to preserve species/tags (e.g. merge_groups) must reassign
+    them to a surviving group before calling this; anything left here is
+    genuinely discarded.
+    """
+    db.execute(delete(BurstGroupSpecies).where(BurstGroupSpecies.burst_group_id == group.id))
+    db.execute(delete(BurstGroupTag).where(BurstGroupTag.burst_group_id == group.id))
+    group.best_shot_photo_id = None
+    group.best_shot_override_photo_id = None
+    db.flush()
+    db.delete(group)
+
+
 def merge_groups(db: Session, into_group_id: uuid.UUID, from_group_id: uuid.UUID) -> uuid.UUID:
     """Manually merges from_group_id's photos into into_group_id (see
     plan: manual upload / grouping overrides — the UI action for bursts
@@ -197,12 +216,167 @@ def merge_groups(db: Session, into_group_id: uuid.UUID, from_group_id: uuid.UUID
 
     from_group = db.get(BurstGroup, from_group_id)
     if from_group is not None:
-        # Clear this group's own best-shot FK columns before delete — they
-        # point at photos that just moved to into_group_id.
-        from_group.best_shot_photo_id = None
-        from_group.best_shot_override_photo_id = None
-        db.flush()
-        db.delete(from_group)
+        _delete_empty_group(db, from_group)
 
     db.flush()
     return into_group_id
+
+
+def _replace_best_shot_after_removal(
+    group: BurstGroup, removed_photo_id: uuid.UUID, remaining: Sequence[Photo]
+) -> None:
+    """Shared by remove_photo_from_group and delete_photo: picks a new
+    best shot for a group after one of its photos left, from whatever
+    scores are available among what remains. If nothing is scored yet,
+    still clears a best-shot/override reference that pointed at the
+    removed photo — otherwise the group would display a "best shot"
+    that's no longer even in it."""
+    scored = [
+        p for p in remaining if p.sharpness_score is not None and p.exposure_score is not None
+    ]
+    if scored:
+        group.best_shot_photo_id = select_best_shot(
+            [
+                PhotoForScoring(
+                    id=p.id,
+                    sharpness_score=_non_null(p.sharpness_score),
+                    exposure_score=_non_null(p.exposure_score),
+                )
+                for p in sorted(scored, key=lambda p: p.taken_at)
+            ]
+        )
+    elif group.best_shot_photo_id == removed_photo_id:
+        group.best_shot_photo_id = remaining[0].id
+
+    if group.best_shot_override_photo_id == removed_photo_id:
+        group.best_shot_override_photo_id = None
+
+
+def remove_photo_from_group(db: Session, photo_id: uuid.UUID) -> uuid.UUID:
+    """Splits one photo out of its current burst group into a new,
+    unlocked singleton group (see plan: manual upload / grouping
+    overrides — the fix for an accidental merge, since merging two whole
+    groups is all-or-nothing). Unlocked so the photo re-enters normal
+    automatic regrouping; the photos left behind stay locked, since
+    removing one photo doesn't change the merge decision covering the
+    rest. If only one photo remains in the old group afterward, it's
+    unlocked too — a "merge" of one photo isn't a merge, and there's
+    nothing left for regroup_all to protect.
+    """
+    photo = db.get(Photo, photo_id)
+    if photo is None:
+        raise ValueError("Photo not found")
+
+    old_group_id = photo.burst_group_id
+    old_group = db.get(BurstGroup, old_group_id)
+    assert old_group is not None
+
+    photos_before_removal = db.execute(
+        select(Photo).where(Photo.burst_group_id == old_group_id)
+    ).scalars().all()
+    if len(photos_before_removal) <= 1:
+        raise ValueError("Photo is already in its own group")
+
+    new_group = BurstGroup()
+    db.add(new_group)
+    db.flush()
+
+    photo.burst_group_id = new_group.id
+    photo.grouping_locked = False
+    db.flush()
+    new_group.best_shot_photo_id = photo.id
+
+    remaining = db.execute(
+        select(Photo).where(Photo.burst_group_id == old_group_id)
+    ).scalars().all()
+    if len(remaining) == 1:
+        remaining[0].grouping_locked = False
+    _replace_best_shot_after_removal(old_group, photo_id, remaining)
+
+    db.flush()
+    return new_group.id
+
+
+@dataclass
+class DeletePhotoOutcome:
+    r2_keys: list[str]
+    # None if this was the group's last photo and it was deleted too —
+    # tells the caller (the web app) whether to redirect away from the
+    # now-gone group page or just refresh it in place.
+    surviving_group_id: uuid.UUID | None
+
+
+def delete_photo(db: Session, photo_id: uuid.UUID) -> DeletePhotoOutcome:
+    """Permanently deletes one photo's DB row. Returns its R2 keys
+    (original/thumb/medium) for the caller to delete from R2 — only
+    after committing this deletion, not before (see
+    import_from_staged_upload for the same before/after-commit
+    ordering rationale: never leave R2 objects deleted while a DB
+    transaction referencing them could still roll back).
+
+    If this was the group's only photo, the now-empty group is deleted
+    too; otherwise a new best shot is picked from what's left.
+    """
+    photo = db.get(Photo, photo_id)
+    if photo is None:
+        raise ValueError("Photo not found")
+
+    group_id = photo.burst_group_id
+    keys = [photo.r2_key_original, photo.r2_key_thumb, photo.r2_key_medium]
+    group = db.get(BurstGroup, group_id)
+    assert group is not None
+
+    # Computed before the delete below — identical to what a post-delete
+    # query would return, since it already excludes photo_id.
+    remaining = db.execute(
+        select(Photo).where(Photo.burst_group_id == group_id, Photo.id != photo_id)
+    ).scalars().all()
+
+    # The group's best-shot/override FKs must stop pointing at photo_id
+    # before it's deleted, or the delete below fails with a
+    # ForeignKeyViolation — same ordering constraint as delete_group.
+    if remaining:
+        _replace_best_shot_after_removal(group, photo_id, remaining)
+    else:
+        group.best_shot_photo_id = None
+        group.best_shot_override_photo_id = None
+    db.flush()
+
+    db.delete(photo)
+    db.flush()
+
+    if not remaining:
+        _delete_empty_group(db, group)
+        db.flush()
+        return DeletePhotoOutcome(r2_keys=keys, surviving_group_id=None)
+
+    return DeletePhotoOutcome(r2_keys=keys, surviving_group_id=group_id)
+
+
+def delete_group(db: Session, group_id: uuid.UUID) -> list[str]:
+    """Permanently deletes an entire burst group and all its photos'
+    DB rows. Returns every deleted photo's R2 keys for the caller to
+    delete from R2 after committing (same ordering rationale as
+    delete_photo)."""
+    group = db.get(BurstGroup, group_id)
+    if group is None:
+        raise ValueError("Group not found")
+
+    # Clear the group's own best-shot/override FKs before deleting its
+    # photos below — they point at one of those photos, so deleting it
+    # first would fail with a ForeignKeyViolation (same ordering
+    # constraint as delete_photo).
+    group.best_shot_photo_id = None
+    group.best_shot_override_photo_id = None
+    db.flush()
+
+    photos = db.execute(select(Photo).where(Photo.burst_group_id == group_id)).scalars().all()
+    keys: list[str] = []
+    for photo in photos:
+        keys.extend([photo.r2_key_original, photo.r2_key_thumb, photo.r2_key_medium])
+        db.delete(photo)
+    db.flush()
+
+    _delete_empty_group(db, group)
+    db.flush()
+    return keys

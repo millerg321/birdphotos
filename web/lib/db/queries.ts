@@ -73,7 +73,7 @@ export async function getAdjacentGroupIds(groupId: string, takenAt: Date) {
     db
       .selectFrom("burst_groups as bg")
       .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
-      .select(["bg.id as groupId"])
+      .select(["bg.id as groupId", "p.r2_key_thumb as thumbKey"])
       .where("p.taken_at", "<", takenAt)
       .where("bg.id", "!=", groupId)
       .orderBy("p.taken_at", "desc")
@@ -82,7 +82,7 @@ export async function getAdjacentGroupIds(groupId: string, takenAt: Date) {
     db
       .selectFrom("burst_groups as bg")
       .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
-      .select(["bg.id as groupId"])
+      .select(["bg.id as groupId", "p.r2_key_thumb as thumbKey"])
       .where("p.taken_at", ">", takenAt)
       .where("bg.id", "!=", groupId)
       .orderBy("p.taken_at", "asc")
@@ -90,7 +90,12 @@ export async function getAdjacentGroupIds(groupId: string, takenAt: Date) {
       .executeTakeFirst(),
   ]);
 
-  return { prevGroupId: prev?.groupId ?? null, nextGroupId: next?.groupId ?? null };
+  return {
+    prevGroupId: prev?.groupId ?? null,
+    prevThumbKey: prev?.thumbKey ?? null,
+    nextGroupId: next?.groupId ?? null,
+    nextThumbKey: next?.thumbKey ?? null,
+  };
 }
 
 export async function setBestShotOverride(groupId: string, photoId: string | null) {

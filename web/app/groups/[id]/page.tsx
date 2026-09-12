@@ -10,9 +10,15 @@ import { getSignedImageUrl } from "@/lib/storage";
 import { formatCamera, formatExposure } from "@/lib/formatExif";
 import { setBestShotOverrideAction } from "@/lib/actions/setBestShotOverride";
 import { reopenForReviewAction } from "@/lib/actions/reviewSpecies";
-import { mergeGroupsAction } from "@/lib/actions/mergeGroups";
+import {
+  deleteGroupAction,
+  deletePhotoAction,
+  mergeGroupsAction,
+  removePhotoFromGroupAction,
+} from "@/lib/actions/manageGroups";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 import { SubmitButton } from "./SubmitButton";
+import { ConfirmButton } from "./ConfirmButton";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
@@ -42,16 +48,30 @@ export default async function GroupDetailPage({
     getAdjacentGroupIds(id, group.takenAt),
   ]);
 
-  const [prevGroupPhotoCount, nextGroupPhotoCount] = await Promise.all([
-    adjacent.prevGroupId ? getGroupPhotos(adjacent.prevGroupId).then((p) => p.length) : 0,
-    adjacent.nextGroupId ? getGroupPhotos(adjacent.nextGroupId).then((p) => p.length) : 0,
-  ]);
+  const [prevGroupPhotoCount, nextGroupPhotoCount, prevThumbUrl, nextThumbUrl] =
+    await Promise.all([
+      adjacent.prevGroupId ? getGroupPhotos(adjacent.prevGroupId).then((p) => p.length) : 0,
+      adjacent.nextGroupId ? getGroupPhotos(adjacent.nextGroupId).then((p) => p.length) : 0,
+      adjacent.prevThumbKey ? getSignedImageUrl(adjacent.prevThumbKey) : null,
+      adjacent.nextThumbKey ? getSignedImageUrl(adjacent.nextThumbKey) : null,
+    ]);
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-10 dark:bg-black">
-      <Link href="/gallery" className="text-sm text-zinc-500 hover:underline">
-        &larr; Back to gallery
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link href="/gallery" className="text-sm text-zinc-500 hover:underline">
+          &larr; Back to gallery
+        </Link>
+        <form action={deleteGroupAction.bind(null, id)}>
+          <ConfirmButton
+            label="Delete this group"
+            confirmLabel="Confirm delete"
+            pendingLabel="Deleting…"
+            className="text-sm text-red-600 hover:underline dark:text-red-400"
+            confirmClassName="text-sm text-red-600 hover:underline dark:text-red-400"
+          />
+        </form>
+      </div>
 
       <div className="mt-4 grid gap-8 md:grid-cols-[2fr_1fr]">
         {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
@@ -169,28 +189,46 @@ export default async function GroupDetailPage({
             {filmstrip.map((photo) => {
               const isSelected = photo.photoId === group.photoId;
               return (
-                <form
-                  key={photo.photoId}
-                  action={setBestShotOverrideAction.bind(null, id, photo.photoId)}
-                >
-                  <button
-                    type="submit"
-                    disabled={isSelected}
-                    className={`overflow-hidden rounded-lg ${
-                      isSelected
-                        ? "ring-2 ring-blue-500"
-                        : "opacity-70 hover:opacity-100"
-                    }`}
-                    title={isSelected ? "Current best shot" : "Set as best shot"}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
-                    <img
-                      src={photo.thumbUrl}
-                      alt=""
-                      className="h-24 w-24 object-cover"
-                    />
-                  </button>
-                </form>
+                <div key={photo.photoId} className="flex flex-col items-center gap-1">
+                  <form action={setBestShotOverrideAction.bind(null, id, photo.photoId)}>
+                    <button
+                      type="submit"
+                      disabled={isSelected}
+                      className={`overflow-hidden rounded-lg ${
+                        isSelected
+                          ? "ring-2 ring-blue-500"
+                          : "opacity-70 hover:opacity-100"
+                      }`}
+                      title={isSelected ? "Current best shot" : "Set as best shot"}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
+                      <img
+                        src={photo.thumbUrl}
+                        alt=""
+                        className="h-24 w-24 object-cover"
+                      />
+                    </button>
+                  </form>
+                  <div className="flex gap-2 text-xs">
+                    <form action={removePhotoFromGroupAction.bind(null, id, photo.photoId)}>
+                      <SubmitButton
+                        pendingLabel="…"
+                        className="text-zinc-500 hover:underline"
+                      >
+                        Remove
+                      </SubmitButton>
+                    </form>
+                    <form action={deletePhotoAction.bind(null, photo.photoId)}>
+                      <ConfirmButton
+                        label="Delete"
+                        confirmLabel="Confirm?"
+                        pendingLabel="…"
+                        className="text-red-600 hover:underline dark:text-red-400"
+                        confirmClassName="text-red-600 hover:underline dark:text-red-400"
+                      />
+                    </form>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -202,28 +240,58 @@ export default async function GroupDetailPage({
           <h2 className="mb-2 text-sm text-zinc-500">
             Same burst, split apart by grouping?
           </h2>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-4">
             {adjacent.prevGroupId !== null && (
-              <form action={mergeGroupsAction.bind(null, id, adjacent.prevGroupId)}>
-                <SubmitButton
-                  pendingLabel="Merging…"
-                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
-                >
-                  Merge with previous group ({prevGroupPhotoCount} photo
-                  {prevGroupPhotoCount === 1 ? "" : "s"})
-                </SubmitButton>
-              </form>
+              <div className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                {prevThumbUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL
+                  <img
+                    src={prevThumbUrl}
+                    alt=""
+                    className="h-16 w-16 rounded object-cover"
+                  />
+                )}
+                <div className="flex flex-col items-start gap-1">
+                  <span className="text-xs text-zinc-500">
+                    Previous group ({prevGroupPhotoCount} photo
+                    {prevGroupPhotoCount === 1 ? "" : "s"})
+                  </span>
+                  <form action={mergeGroupsAction.bind(null, id, adjacent.prevGroupId)}>
+                    <SubmitButton
+                      pendingLabel="Merging…"
+                      className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                    >
+                      Merge with this
+                    </SubmitButton>
+                  </form>
+                </div>
+              </div>
             )}
             {adjacent.nextGroupId !== null && (
-              <form action={mergeGroupsAction.bind(null, id, adjacent.nextGroupId)}>
-                <SubmitButton
-                  pendingLabel="Merging…"
-                  className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
-                >
-                  Merge with next group ({nextGroupPhotoCount} photo
-                  {nextGroupPhotoCount === 1 ? "" : "s"})
-                </SubmitButton>
-              </form>
+              <div className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                {nextThumbUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL
+                  <img
+                    src={nextThumbUrl}
+                    alt=""
+                    className="h-16 w-16 rounded object-cover"
+                  />
+                )}
+                <div className="flex flex-col items-start gap-1">
+                  <span className="text-xs text-zinc-500">
+                    Next group ({nextGroupPhotoCount} photo
+                    {nextGroupPhotoCount === 1 ? "" : "s"})
+                  </span>
+                  <form action={mergeGroupsAction.bind(null, id, adjacent.nextGroupId)}>
+                    <SubmitButton
+                      pendingLabel="Merging…"
+                      className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                    >
+                      Merge with this
+                    </SubmitButton>
+                  </form>
+                </div>
+              </div>
             )}
           </div>
         </div>
