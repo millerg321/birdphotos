@@ -58,3 +58,28 @@ jobs:
       - run: mypy app
       - run: alembic upgrade head
       - run: pytest -q
+
+  # Vercel's own Git integration is deliberately disabled
+  # (commandForIgnoringBuildStep = "exit 0" on the project) so a push to
+  # main can never deploy on its own — this job is the only path to
+  # production, and it only runs once both CI jobs above have passed.
+  deploy-web:
+    needs: [web, worker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --global vercel@latest
+      - run: vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+      - run: vercel build --prod --token=$VERCEL_TOKEN
+      - run: vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
