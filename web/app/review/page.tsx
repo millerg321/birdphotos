@@ -1,6 +1,7 @@
 import { getGroupCandidates, getReviewQueueGroups } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { confirmCandidateAction, rejectAllCandidatesAction } from "@/lib/actions/reviewSpecies";
+import { wikipediaSearchUrl } from "@/lib/wikipedia";
 
 // Same reasoning as app/gallery/page.tsx: DB queries and presigned URLs
 // aren't visible to Next's static/dynamic heuristics, and this page
@@ -64,7 +65,18 @@ export default async function ReviewPage() {
                       {formatCandidateLabel(candidate.commonName, candidate.rawLabel)}
                       {candidate.scientificName && (
                         <span className="text-zinc-500 italic"> — {candidate.scientificName}</span>
-                      )}
+                      )}{" "}
+                      <a
+                        href={wikipediaSearchUrl(
+                          candidate.scientificName ??
+                            formatCandidateLabel(candidate.commonName, candidate.rawLabel),
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        Wikipedia ↗
+                      </a>
                     </span>
                     <span className="flex items-center gap-3">
                       <span className="text-zinc-500">
