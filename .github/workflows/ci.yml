@@ -67,9 +67,11 @@ jobs:
     needs: [web, worker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
+    # Deliberately no working-directory override: the Vercel project's
+    # Root Directory setting is "web" (needed for git-integration builds,
+    # which start from repo root), so these commands must also run from
+    # repo root — running them from inside web/ double-applies it and
+    # vercel build looks for web/web/package.json (hit this exact bug).
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
