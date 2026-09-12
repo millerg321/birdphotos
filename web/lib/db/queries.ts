@@ -161,7 +161,7 @@ export async function getConfirmedCandidate(groupId: string) {
   return row ?? null;
 }
 
-function slugify(text: string): string {
+export function slugify(text: string): string {
   const slug = text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -169,28 +169,58 @@ function slugify(text: string): string {
   return slug || "unknown";
 }
 
-// Case-insensitive match on common_name, same as the Python worker's
-// get_or_create_species — accepts some risk of near-duplicate species
-// rows from inconsistent phrasing between AI and manual entries.
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code: unknown }).code === "23505"
+  );
+}
+
+// Matches on common_name (case-insensitive, same as the Python worker's
+// get_or_create_species) OR on the generated slug — the two aren't the
+// same check: slug normalizes away punctuation/whitespace differences
+// that an exact-modulo-case common_name match doesn't, so two typed
+// names that *look* different but slugify identically (e.g. "Ring
+// necked Parakeet" vs "Ring-necked Parakeet") used to pass the
+// common_name check, then crash the whole request on the slug's unique
+// constraint. Caught this exact crash in production. The catch below is
+// a second line of defense for a same-slug race between two concurrent
+// inserts, which the upfront check can't rule out.
 async function getOrCreateSpeciesId(
   executor: typeof db,
   commonName: string,
 ): Promise<string> {
+  const slug = slugify(commonName);
+
   const existing = await executor
     .selectFrom("species")
     .select("id")
-    .where("common_name", "ilike", commonName)
+    .where((eb) => eb.or([eb("common_name", "ilike", commonName), eb("slug", "=", slug)]))
     .executeTakeFirst();
   if (existing) return existing.id;
 
-  // id has no DB-side default (the worker generates it app-side with
-  // uuid.uuid4() too — see app/models.py uuid_pk()), so it's required here.
-  const inserted = await executor
-    .insertInto("species")
-    .values({ id: randomUUID(), common_name: commonName, slug: slugify(commonName) })
-    .returning("id")
-    .executeTakeFirstOrThrow();
-  return inserted.id;
+  try {
+    // id has no DB-side default (the worker generates it app-side with
+    // uuid.uuid4() too — see app/models.py uuid_pk()), so it's required here.
+    const inserted = await executor
+      .insertInto("species")
+      .values({ id: randomUUID(), common_name: commonName, slug })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    return inserted.id;
+  } catch (err) {
+    if (!isUniqueViolation(err)) {
+      throw err;
+    }
+    const bySlug = await executor
+      .selectFrom("species")
+      .select("id")
+      .where("slug", "=", slug)
+      .executeTakeFirstOrThrow();
+    return bySlug.id;
+  }
 }
 
 // Lets a reviewer type the correct species directly when none of the AI
