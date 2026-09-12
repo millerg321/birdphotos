@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  addManualSpecies as addManualSpeciesQuery,
   confirmCandidate as confirmCandidateQuery,
   rejectAllCandidates as rejectAllCandidatesQuery,
   reopenGroupForReview as reopenGroupForReviewQuery,
@@ -38,5 +39,20 @@ export async function reopenForReviewAction(groupId: string): Promise<void> {
   await currentReviewerEmail(); // require auth even though not stored here
   await reopenGroupForReviewQuery(groupId);
   revalidatePath("/review");
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function addManualSpeciesAction(
+  groupId: string,
+  formData: FormData,
+): Promise<void> {
+  const reviewedBy = await currentReviewerEmail();
+  const commonName = String(formData.get("commonName") ?? "").trim();
+  if (!commonName) {
+    return;
+  }
+  await addManualSpeciesQuery(groupId, commonName, reviewedBy);
+  revalidatePath("/review");
+  revalidatePath("/gallery");
   revalidatePath(`/groups/${groupId}`);
 }

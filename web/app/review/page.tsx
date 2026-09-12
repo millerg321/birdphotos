@@ -1,6 +1,11 @@
 import { getGroupCandidates, getReviewQueueGroups } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
-import { confirmCandidateAction, rejectAllCandidatesAction } from "@/lib/actions/reviewSpecies";
+import {
+  addManualSpeciesAction,
+  confirmCandidateAction,
+  rejectAllCandidatesAction,
+  reopenForReviewAction,
+} from "@/lib/actions/reviewSpecies";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 
 // Same reasoning as app/gallery/page.tsx: DB queries and presigned URLs
@@ -21,7 +26,14 @@ export default async function ReviewPage() {
         getSignedImageUrl(group.thumbKey),
         getGroupCandidates(group.groupId),
       ]);
-      return { ...group, thumbUrl, candidates };
+      const pending = candidates.filter((c) => c.status === "pending_review");
+      // All candidates got rejected via "None of these" — see plan/app.
+      // Distinct from "never classified" (candidates.length === 0), which
+      // shouldn't currently happen post-Phase-4 batch but is handled the
+      // same way (no pending list, no "reopen" since there's nothing to
+      // reopen — just the manual-tag form).
+      const isUnidentified = candidates.length > 0 && pending.length === 0;
+      return { ...group, thumbUrl, pending, isUnidentified };
     }),
   );
 
@@ -49,59 +61,87 @@ export default async function ReviewPage() {
             />
 
             <div className="flex-1 space-y-2">
-              {item.candidates
-                .filter((c) => c.status === "pending_review")
-                .map((candidate) => (
-                  <form
-                    key={candidate.candidateId}
-                    action={confirmCandidateAction.bind(
-                      null,
-                      item.groupId,
-                      candidate.candidateId,
-                    )}
-                    className="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 text-sm dark:bg-black"
-                  >
-                    <span className="text-black dark:text-zinc-50">
-                      {formatCandidateLabel(candidate.commonName, candidate.rawLabel)}
-                      {candidate.scientificName && (
-                        <span className="text-zinc-500 italic"> — {candidate.scientificName}</span>
-                      )}{" "}
-                      <a
-                        href={wikipediaSearchUrl(
-                          candidate.scientificName ??
-                            formatCandidateLabel(candidate.commonName, candidate.rawLabel),
-                        )}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                      >
-                        Wikipedia ↗
-                      </a>
-                    </span>
-                    <span className="flex items-center gap-3">
-                      <span className="text-zinc-500">
-                        {candidate.confidence !== null
-                          ? `${Math.round(candidate.confidence * 100)}%`
-                          : "—"}
-                      </span>
-                      <button
-                        type="submit"
-                        className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-black"
-                      >
-                        Confirm
-                      </button>
-                    </span>
-                  </form>
-                ))}
-
-              <form action={rejectAllCandidatesAction.bind(null, item.groupId)}>
-                <button
-                  type="submit"
-                  className="text-sm text-zinc-500 hover:underline"
+              {item.pending.map((candidate) => (
+                <form
+                  key={candidate.candidateId}
+                  action={confirmCandidateAction.bind(
+                    null,
+                    item.groupId,
+                    candidate.candidateId,
+                  )}
+                  className="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 text-sm dark:bg-black"
                 >
-                  None of these / unidentified
-                </button>
-              </form>
+                  <span className="text-black dark:text-zinc-50">
+                    {formatCandidateLabel(candidate.commonName, candidate.rawLabel)}
+                    {candidate.scientificName && (
+                      <span className="text-zinc-500 italic"> — {candidate.scientificName}</span>
+                    )}{" "}
+                    <a
+                      href={wikipediaSearchUrl(
+                        candidate.scientificName ??
+                          formatCandidateLabel(candidate.commonName, candidate.rawLabel),
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      Wikipedia ↗
+                    </a>
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-zinc-500">
+                      {candidate.confidence !== null
+                        ? `${Math.round(candidate.confidence * 100)}%`
+                        : "—"}
+                    </span>
+                    <button
+                      type="submit"
+                      className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-black"
+                    >
+                      Confirm
+                    </button>
+                  </span>
+                </form>
+              ))}
+
+              {item.isUnidentified && (
+                <div className="flex items-center gap-1 text-sm text-zinc-500">
+                  <span>Marked unidentified.</span>
+                  <form action={reopenForReviewAction.bind(null, item.groupId)}>
+                    <button type="submit" className="hover:underline">
+                      Reopen AI suggestions
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                {item.pending.length > 0 && (
+                  <form action={rejectAllCandidatesAction.bind(null, item.groupId)}>
+                    <button type="submit" className="text-sm text-zinc-500 hover:underline">
+                      None of these / unidentified
+                    </button>
+                  </form>
+                )}
+                <form
+                  action={addManualSpeciesAction.bind(null, item.groupId)}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="text"
+                    name="commonName"
+                    placeholder="Type the species…"
+                    required
+                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-black"
+                  >
+                    Tag
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         ))}

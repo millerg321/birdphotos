@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { db } from "./client";
 
@@ -70,17 +71,24 @@ export async function setBestShotOverride(groupId: string, photoId: string | nul
     .execute();
 }
 
+// A group needs attention as long as nothing's confirmed — this covers
+// both "still has pending_review candidates" and "marked unidentified"
+// (all rejected, none confirmed). Previously only the first case showed
+// here, so clicking "None of these" made a group vanish from the queue
+// entirely with no way back except knowing its direct URL.
 export async function getReviewQueueGroups() {
   return db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
     .where((eb) =>
-      eb.exists(
-        eb
-          .selectFrom("burst_group_species as bgs")
-          .select("bgs.id")
-          .whereRef("bgs.burst_group_id", "=", "bg.id")
-          .where("bgs.status", "=", "pending_review"),
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom("burst_group_species as bgs")
+            .select("bgs.id")
+            .whereRef("bgs.burst_group_id", "=", "bg.id")
+            .where("bgs.status", "=", "confirmed"),
+        ),
       ),
     )
     .select(["bg.id as groupId", "p.r2_key_thumb as thumbKey", "p.taken_at as takenAt"])
@@ -151,6 +159,73 @@ export async function getConfirmedCandidate(groupId: string) {
     .executeTakeFirst();
 
   return row ?? null;
+}
+
+function slugify(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "unknown";
+}
+
+// Case-insensitive match on common_name, same as the Python worker's
+// get_or_create_species — accepts some risk of near-duplicate species
+// rows from inconsistent phrasing between AI and manual entries.
+async function getOrCreateSpeciesId(
+  executor: typeof db,
+  commonName: string,
+): Promise<string> {
+  const existing = await executor
+    .selectFrom("species")
+    .select("id")
+    .where("common_name", "ilike", commonName)
+    .executeTakeFirst();
+  if (existing) return existing.id;
+
+  // id has no DB-side default (the worker generates it app-side with
+  // uuid.uuid4() too — see app/models.py uuid_pk()), so it's required here.
+  const inserted = await executor
+    .insertInto("species")
+    .values({ id: randomUUID(), common_name: commonName, slug: slugify(commonName) })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  return inserted.id;
+}
+
+// Lets a reviewer type the correct species directly when none of the AI
+// candidates are right, rather than being stuck with only "confirm one
+// of these three" or "mark unidentified with no way to say what it
+// actually is".
+export async function addManualSpecies(
+  groupId: string,
+  commonName: string,
+  reviewedBy: string,
+) {
+  await db.transaction().execute(async (trx) => {
+    const speciesId = await getOrCreateSpeciesId(trx, commonName);
+
+    await trx
+      .updateTable("burst_group_species")
+      .set({ status: "rejected" })
+      .where("burst_group_id", "=", groupId)
+      .where("status", "=", "pending_review")
+      .execute();
+
+    await trx
+      .insertInto("burst_group_species")
+      .values({
+        id: randomUUID(),
+        burst_group_id: groupId,
+        species_id: speciesId,
+        raw_label: commonName,
+        source: "manual",
+        status: "confirmed",
+        reviewed_by: reviewedBy,
+        reviewed_at: new Date(),
+      })
+      .execute();
+  });
 }
 
 // Puts every candidate for the group (confirmed and rejected alike) back
