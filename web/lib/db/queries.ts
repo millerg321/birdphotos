@@ -133,3 +133,34 @@ export async function rejectAllCandidates(groupId: string, reviewedBy: string) {
     .where("burst_group_id", "=", groupId)
     .execute();
 }
+
+export async function getConfirmedCandidate(groupId: string) {
+  const row = await db
+    .selectFrom("burst_group_species as bgs")
+    .leftJoin("species as s", "s.id", "bgs.species_id")
+    .select([
+      "bgs.id as candidateId",
+      "bgs.raw_label as rawLabel",
+      "bgs.reviewed_by as reviewedBy",
+      "bgs.reviewed_at as reviewedAt",
+      "s.common_name as commonName",
+      "s.scientific_name as scientificName",
+    ])
+    .where("bgs.burst_group_id", "=", groupId)
+    .where("bgs.status", "=", "confirmed")
+    .executeTakeFirst();
+
+  return row ?? null;
+}
+
+// Puts every candidate for the group (confirmed and rejected alike) back
+// to pending_review and clears the review attribution — the group then
+// reappears in /review so a mis-click can be corrected, since there was
+// previously no way to undo a confirmation once made.
+export async function reopenGroupForReview(groupId: string) {
+  await db
+    .updateTable("burst_group_species")
+    .set({ status: "pending_review", reviewed_by: null, reviewed_at: null })
+    .where("burst_group_id", "=", groupId)
+    .execute();
+}

@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getGroupDetail, getGroupPhotos } from "@/lib/db/queries";
+import { getConfirmedCandidate, getGroupDetail, getGroupPhotos } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { formatCamera, formatExposure } from "@/lib/formatExif";
 import { setBestShotOverrideAction } from "@/lib/actions/setBestShotOverride";
+import { reopenForReviewAction } from "@/lib/actions/reviewSpecies";
+import { wikipediaSearchUrl } from "@/lib/wikipedia";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
@@ -21,7 +23,7 @@ export default async function GroupDetailPage({
   }
 
   const photos = await getGroupPhotos(id);
-  const [mediumUrl, filmstrip] = await Promise.all([
+  const [mediumUrl, filmstrip, confirmedCandidate] = await Promise.all([
     getSignedImageUrl(group.mediumKey),
     Promise.all(
       photos.map(async (photo) => ({
@@ -29,6 +31,7 @@ export default async function GroupDetailPage({
         thumbUrl: await getSignedImageUrl(photo.thumbKey),
       })),
     ),
+    getConfirmedCandidate(id),
   ]);
 
   return (
@@ -46,6 +49,49 @@ export default async function GroupDetailPage({
         />
 
         <dl className="space-y-3 text-sm">
+          <div>
+            <dt className="text-zinc-500">Species</dt>
+            <dd className="text-black dark:text-zinc-50">
+              {confirmedCandidate ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {confirmedCandidate.commonName ?? confirmedCandidate.rawLabel ?? "Unknown"}
+                    {confirmedCandidate.scientificName && (
+                      <span className="text-zinc-500 italic">
+                        {" "}
+                        — {confirmedCandidate.scientificName}
+                      </span>
+                    )}
+                  </span>
+                  <a
+                    href={wikipediaSearchUrl(
+                      confirmedCandidate.scientificName ??
+                        confirmedCandidate.commonName ??
+                        confirmedCandidate.rawLabel ??
+                        "",
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Wikipedia ↗
+                  </a>
+                  <form action={reopenForReviewAction.bind(null, id)}>
+                    <button
+                      type="submit"
+                      className="text-xs text-zinc-500 hover:underline"
+                    >
+                      Not this? Reopen for review
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <Link href="/review" className="text-blue-600 hover:underline dark:text-blue-400">
+                  Not yet reviewed
+                </Link>
+              )}
+            </dd>
+          </div>
           <div>
             <dt className="text-zinc-500">Taken</dt>
             <dd className="text-black dark:text-zinc-50">
