@@ -12,6 +12,7 @@ from app.classification import (
     CLASSIFICATION_MODEL,
     SpeciesClassification,
     build_classification_prompt,
+    classify_photo_sync,
     get_anthropic_client,
     image_block,
 )
@@ -210,21 +211,76 @@ def ingest_batch_results(db: Session, batch_id: str) -> int:
             # — skip this one group rather than losing the whole batch.
             continue
 
-        for candidate in classification.candidates:
-            species = get_or_create_species(db, candidate.common_name, candidate.scientific_name)
-            db.add(
-                BurstGroupSpecies(
-                    burst_group_id=group_id,
-                    species_id=species.id,
-                    raw_label=candidate.common_name,
-                    source="ai_suggested",
-                    confidence=candidate.confidence,
-                    status="pending_review",
-                    model_id=CLASSIFICATION_MODEL,
-                    raw_response=classification.model_dump(),
-                )
-            )
+        _insert_candidates(db, group_id, classification)
         ingested += 1
 
     db.flush()
     return ingested
+
+
+def _insert_candidates(
+    db: Session, group_id: uuid.UUID, classification: SpeciesClassification
+) -> None:
+    """Shared by ingest_batch_results and classify_new_groups_sync: one
+    burst_group_species row per candidate (source 'ai_suggested', status
+    'pending_review' — see app/queries.py get_effective_species)."""
+    for candidate in classification.candidates:
+        species = get_or_create_species(db, candidate.common_name, candidate.scientific_name)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=group_id,
+                species_id=species.id,
+                raw_label=candidate.common_name,
+                source="ai_suggested",
+                confidence=candidate.confidence,
+                status="pending_review",
+                model_id=CLASSIFICATION_MODEL,
+                raw_response=classification.model_dump(),
+            )
+        )
+
+
+def classify_new_groups_sync(db: Session) -> int:
+    """Synchronous incremental classification for the manual upload flow
+    (see plan: AI Species Classification / manual upload). Classifies
+    every group that doesn't have a species candidate yet, one group at
+    a time via classify_photo_sync — meant to run as part of the same
+    "Score & group new photos" action used after uploading.
+
+    The bulk backlog path (scripts/classify_backlog.py) uses the
+    cheaper Batch API instead, but its submit-then-poll shape doesn't
+    suit classifying a handful of new uploads on demand; this costs a
+    real (if small — Haiku, per-group not per-photo) API call per
+    group every time it runs, in exchange for an immediate result.
+
+    A group whose photo can't be identified at all (empty candidates,
+    per the prompt's own instruction) gets no burst_group_species row
+    and so will be retried on the next run — same behavior as the
+    batch path, not something introduced here.
+    """
+    groups = _groups_needing_classification(db)
+    if not groups:
+        return 0
+
+    client = get_anthropic_client()
+    classified = 0
+    for group in groups:
+        best_shot_id = group.best_shot_override_photo_id or group.best_shot_photo_id
+        if best_shot_id is None:
+            continue
+        photo = db.get(Photo, best_shot_id)
+        if photo is None:
+            continue
+        image_bytes = download_bytes(photo.r2_key_medium)
+
+        location_hint = None
+        if photo.location_id is not None:
+            location = db.get(Location, photo.location_id)
+            location_hint = location.name if location is not None else None
+
+        classification = classify_photo_sync(client, image_bytes, "image/webp", location_hint)
+        _insert_candidates(db, group.id, classification)
+        classified += 1
+
+    db.flush()
+    return classified

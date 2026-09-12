@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
 from app.db import get_db
+from app.jobs.classify_species import classify_new_groups_sync
 from app.jobs.group_bursts import (
     backfill_scores,
     delete_group,
@@ -55,6 +56,7 @@ def import_from_upload(
 class BackfillAndGroupResult(BaseModel):
     scored: int
     groups: int
+    classified: int
 
 
 @app.post(
@@ -66,17 +68,28 @@ def run_backfill_and_group(
     db: Session = Depends(get_db),  # noqa: B008 - idiomatic FastAPI dependency injection
 ) -> BackfillAndGroupResult:
     """Manual trigger for the same scoring/grouping pass scripts/backfill_and_group.py
-    runs — deliberately not part of the upload flow itself (see plan:
-    manual upload). regroup_all rescans every scored photo rather than
-    just what's new, so running it per-upload would make each upload's
-    response wait on an ever-growing full-library pass; call this
-    endpoint after a batch of uploads instead. May go away if/once
-    uploads get proper incremental grouping."""
+    runs, plus incremental AI species classification for whatever comes
+    out newly grouped — deliberately not part of the upload flow itself
+    (see plan: manual upload). regroup_all rescans every scored photo
+    rather than just what's new, so running it per-upload would make
+    each upload's response wait on an ever-growing full-library pass;
+    call this endpoint after a batch of uploads instead. May go away
+    if/once uploads get proper incremental grouping.
+
+    Classification runs last, after grouping has settled — classifying
+    per photo before regrouping would waste API calls per individual
+    photo instead of once per final burst group (see plan: AI Species
+    Classification, cost control by construction). Uses
+    classify_photo_sync rather than the Batch API's submit-then-poll
+    (scripts/classify_backlog.py) since manual uploads are a small,
+    on-demand trickle, not a large one-off backlog."""
     scored = backfill_scores(db)
     db.commit()
     groups = regroup_all(db)
     db.commit()
-    return BackfillAndGroupResult(scored=scored, groups=groups)
+    classified = classify_new_groups_sync(db)
+    db.commit()
+    return BackfillAndGroupResult(scored=scored, groups=groups, classified=classified)
 
 
 class MergeGroupsRequest(BaseModel):

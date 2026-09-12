@@ -5,9 +5,11 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.orm import Session
 
+from app.classification import SpeciesClassification
 from app.jobs.classify_species import (
     _groups_needing_classification,
     _slugify,
+    classify_new_groups_sync,
     clear_unreviewed_ai_suggestions,
     get_or_create_species,
     ingest_batch_results,
@@ -296,3 +298,143 @@ class TestIngestBatchResults:
 
         count = ingest_batch_results(db, "batch_123")
         assert count == 0
+
+
+def _barn_owl_classification(confidence: float = 0.87) -> SpeciesClassification:
+    return SpeciesClassification.model_validate(
+        {
+            "candidates": [
+                {
+                    "common_name": "Barn Owl",
+                    "scientific_name": "Tyto alba",
+                    "confidence": confidence,
+                }
+            ],
+            "notes": None,
+        }
+    )
+
+
+class TestClassifyNewGroupsSync:
+    def test_returns_zero_when_nothing_to_classify(self, db: Session) -> None:
+        assert classify_new_groups_sync(db) == 0
+
+    def test_classifies_each_unclassified_group(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        group_a = _make_group_with_photo(db)
+        group_b = _make_group_with_photo(db)
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint: _barn_owl_classification(),
+        )
+
+        count = classify_new_groups_sync(db)
+
+        assert count == 2
+        for group in (group_a, group_b):
+            rows = (
+                db.query(BurstGroupSpecies)
+                .filter(BurstGroupSpecies.burst_group_id == group.id)
+                .all()
+            )
+            assert len(rows) == 1
+            assert rows[0].source == "ai_suggested"
+            assert rows[0].status == "pending_review"
+
+    def test_skips_already_classified_groups(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        classified = _make_group_with_photo(db)
+        species = get_or_create_species(db, "Barn Owl", None)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=classified.id,
+                species_id=species.id,
+                source="ai_suggested",
+                status="pending_review",
+                confidence=0.8,
+            )
+        )
+        db.flush()
+
+        calls = []
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint: (
+                calls.append(1) or _barn_owl_classification()
+            ),
+        )
+
+        count = classify_new_groups_sync(db)
+
+        assert count == 0
+        assert calls == []
+
+    def test_includes_location_hint_when_photo_has_one(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        location = get_or_create_location(db, "Borneo", 1.0, 114.0)
+        _make_group_with_photo(db, location_id=location.id)
+
+        seen_hints = []
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+
+        def fake_classify(client, image_bytes, media_type, location_hint):
+            seen_hints.append(location_hint)
+            return _barn_owl_classification()
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync", fake_classify
+        )
+
+        classify_new_groups_sync(db)
+
+        assert seen_hints == ["Borneo"]
+
+    def test_no_row_inserted_when_bird_not_identifiable(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        group = _make_group_with_photo(db)
+        empty_classification = SpeciesClassification.model_validate(
+            {"candidates": [], "notes": "No bird visible"}
+        )
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint: empty_classification,
+        )
+
+        count = classify_new_groups_sync(db)
+
+        assert count == 1  # attempted — just yielded no candidates
+        rows = (
+            db.query(BurstGroupSpecies)
+            .filter(BurstGroupSpecies.burst_group_id == group.id)
+            .all()
+        )
+        assert rows == []

@@ -21,7 +21,10 @@ export function UploadForm() {
     setRescanResult(null);
     try {
       const result = await rescanAction();
-      setRescanResult(`Scored ${result.scored}, ${result.groups} burst group(s) total`);
+      setRescanResult(
+        `Scored ${result.scored}, ${result.groups} burst group(s) total, ` +
+          `${result.classified} newly classified`,
+      );
     } catch (err) {
       setRescanResult(err instanceof Error ? err.message : "Rescan failed");
     }
@@ -150,9 +153,10 @@ export function UploadForm() {
 
       <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
         <p className="mb-2 text-xs text-zinc-500">
-          Newly uploaded photos aren&apos;t scored or grouped into bursts until
-          this runs. It rescans the whole library, so run it once after a
-          batch rather than after each photo.
+          Newly uploaded photos aren&apos;t scored, grouped into bursts, or
+          run through AI species suggestion until this runs. It rescans the
+          whole library, so run it once after a batch rather than after
+          each photo.
         </p>
         <button
           type="button"
@@ -160,7 +164,7 @@ export function UploadForm() {
           disabled={rescanning}
           className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
         >
-          {rescanning ? "Scoring & grouping…" : "Score & group new photos"}
+          {rescanning ? "Scoring, grouping & classifying…" : "Score, group & classify new photos"}
         </button>
         {rescanResult && (
           <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">{rescanResult}</p>

@@ -70,12 +70,17 @@ export async function processUploadsAction(r2Keys: string[]): Promise<ProcessUpl
 export interface RescanResult {
   scored: number;
   groups: number;
+  classified: number;
 }
 
 // Manual trigger only (see plan: manual upload) — scoring/grouping is a
 // full-library rescan, not incremental, so it deliberately doesn't run
 // automatically after every upload. Hit this once after uploading a
-// batch. May go away if/once uploads get proper incremental grouping.
+// batch. Also runs incremental AI species classification for anything
+// newly grouped (see worker/app/jobs/classify_species.py
+// classify_new_groups_sync) — manual uploads previously had no path to
+// AI classification at all, only manual tagging. May go away if/once
+// uploads get proper incremental grouping.
 export async function rescanAction(): Promise<RescanResult> {
   await requireSession();
 
@@ -90,5 +95,6 @@ export async function rescanAction(): Promise<RescanResult> {
 
   const result: RescanResult = await response.json();
   revalidatePath("/gallery");
+  revalidatePath("/review");
   return result;
 }
