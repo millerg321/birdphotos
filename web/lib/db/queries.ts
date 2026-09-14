@@ -6,16 +6,56 @@ import { db } from "./client";
 // override always wins over the computed best shot (see plan: Data Model).
 const EFFECTIVE_BEST_SHOT = sql<boolean>`coalesce(bg.best_shot_override_photo_id, bg.best_shot_photo_id) = p.id`;
 
+// Enriched for the gallery cards: confirmed species (null on both
+// fields means unreviewed — same meaning as getConfirmedCandidate
+// returning null, just bulk-fetched here instead of per-group), photo
+// count (for the burst-count badge), and raw GPS/location fields (the
+// page applies hasValidGps + locationName itself, same as the group
+// detail page, rather than duplicating that decision here).
 export async function getGalleryGroups() {
   return db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
-    .select([
+    .leftJoin("locations as l", "l.id", "p.location_id")
+    .leftJoin(
+      (eb) =>
+        eb
+          .selectFrom("burst_group_species as bgs")
+          .leftJoin("species as s", "s.id", "bgs.species_id")
+          .select([
+            "bgs.burst_group_id",
+            "s.common_name as commonName",
+            "bgs.raw_label as rawLabel",
+          ])
+          .where("bgs.status", "=", "confirmed")
+          // Defense in depth: the rest of the app assumes at most one
+          // confirmed row per group, but a real bug once let two coexist
+          // (see addManualSpecies) — DISTINCT ON keeps this join from
+          // ever producing two rows for the same group (a React
+          // duplicate-key crash on this page) even if that invariant is
+          // ever violated again. Most-recently-reviewed wins.
+          .distinctOn("bgs.burst_group_id")
+          .orderBy("bgs.burst_group_id")
+          .orderBy("bgs.reviewed_at", "desc")
+          .as("confirmed"),
+      (join) => join.onRef("confirmed.burst_group_id", "=", "bg.id"),
+    )
+    .select((eb) => [
       "bg.id as groupId",
       "p.id as photoId",
       "p.r2_key_thumb as thumbKey",
       "p.taken_at as takenAt",
       "p.camera_model as cameraModel",
+      "p.gps_lat as gpsLat",
+      "p.gps_lng as gpsLng",
+      "l.name as locationName",
+      "confirmed.commonName as speciesCommonName",
+      "confirmed.rawLabel as speciesRawLabel",
+      eb
+        .selectFrom("photos as p2")
+        .select((eb2) => eb2.fn.countAll<number>().as("count"))
+        .whereRef("p2.burst_group_id", "=", "bg.id")
+        .as("photoCount"),
     ])
     .orderBy("p.taken_at", "desc")
     .execute();
@@ -272,11 +312,21 @@ export async function addManualSpecies(
   await db.transaction().execute(async (trx) => {
     const speciesId = await getOrCreateSpeciesId(trx, commonName);
 
+    // Reject every existing row regardless of status, not just pending
+    // ones — a group can already have a *confirmed* candidate (from an
+    // earlier AI-suggestion confirm) by the time someone decides to
+    // retype it manually instead. Only filtering on pending_review left
+    // that old confirmed row standing, so the group ended up with two
+    // confirmed rows at once — the "at most one confirmed" invariant
+    // every other query assumes (getConfirmedCandidate's
+    // executeTakeFirst() silently picked one; getGalleryGroups's join
+    // instead produced two rows for the same group, a real duplicate-
+    // React-key bug this surfaced). Typing a species manually is meant
+    // to be the definitive answer either way, confirmed or not.
     await trx
       .updateTable("burst_group_species")
       .set({ status: "rejected" })
       .where("burst_group_id", "=", groupId)
-      .where("status", "=", "pending_review")
       .execute();
 
     await trx

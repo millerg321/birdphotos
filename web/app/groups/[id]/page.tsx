@@ -7,7 +7,7 @@ import {
   getGroupPhotos,
 } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
-import { formatCamera, formatExposure } from "@/lib/formatExif";
+import { formatCamera, formatExposure, hasValidGps } from "@/lib/formatExif";
 import { setBestShotOverrideAction } from "@/lib/actions/setBestShotOverride";
 import { reopenForReviewAction } from "@/lib/actions/reviewSpecies";
 import {
@@ -20,18 +20,6 @@ import { wikipediaSearchUrl } from "@/lib/wikipedia";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmButton } from "./ConfirmButton";
 import { SetLocationForm } from "./SetLocationForm";
-
-// Guards against a data quirk, not just a hypothetical: some cameras/
-// apps write a literal 0/0 GPS rational when location was unavailable
-// rather than omitting the tag, and Pillow silently turns that into NaN
-// instead of raising (see worker/app/exif_utils.py _gps_to_decimal,
-// fixed there for new imports going forward). NaN survived into
-// Postgres for at least one already-imported photo — it's neither SQL
-// NULL nor JS null, so treat it explicitly as "no real GPS" here too,
-// or the manual location override never shows for that photo.
-function hasValidGps(lat: number | null, lng: number | null): boolean {
-  return lat !== null && lng !== null && !Number.isNaN(lat) && !Number.isNaN(lng);
-}
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
