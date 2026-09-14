@@ -18,8 +18,8 @@ import {
 } from "@/lib/actions/manageGroups";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 import { SubmitButton } from "@/components/SubmitButton";
+import { SetLocationForm } from "@/components/SetLocationForm";
 import { ConfirmButton } from "./ConfirmButton";
-import { SetLocationForm } from "./SetLocationForm";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).

@@ -7,6 +7,8 @@ import {
   reopenForReviewAction,
 } from "@/lib/actions/reviewSpecies";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
+import { hasValidGps } from "@/lib/formatExif";
+import { SetLocationForm } from "@/components/SetLocationForm";
 import { ReclassifyButton } from "./ReclassifyButton";
 
 // Same reasoning as app/gallery/page.tsx: DB queries and presigned URLs
@@ -62,6 +64,13 @@ export default async function ReviewPage() {
             />
 
             <div className="flex-1 space-y-2">
+              {!hasValidGps(item.gpsLat, item.gpsLng) && (
+                <div className="text-sm text-zinc-500">
+                  <span>{item.locationName ?? "No location"}</span>
+                  <SetLocationForm groupId={item.groupId} />
+                </div>
+              )}
+
               {item.pending.map((candidate) => (
                 <form
                   key={candidate.candidateId}

@@ -101,7 +101,10 @@ export interface SetGroupLocationResult {
 // Meant to be set before running classification, since location context
 // materially changes AI species suggestions — this is what lets a
 // manually-uploaded photo with no GPS EXIF get the same benefit a
-// GPS-tagged one already does.
+// GPS-tagged one already does. Callable from both the group detail page
+// and /review (SetLocationForm is shared between the two — setting
+// location ahead of confirming a species is exactly the review-queue
+// workflow this is for), so both paths are revalidated.
 export async function setGroupLocationAction(
   groupId: string,
   placeName: string,
@@ -112,6 +115,7 @@ export async function setGroupLocationAction(
     place_name: placeName,
   })) as { location_id: string; name: string };
   revalidatePath(`/groups/${groupId}`);
+  revalidatePath("/review");
   return { locationId: result.location_id, name: result.name };
 }
 

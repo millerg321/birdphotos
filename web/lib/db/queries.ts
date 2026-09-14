@@ -191,6 +191,7 @@ export async function getReviewQueueGroups() {
   return db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
+    .leftJoin("locations as l", "l.id", "p.location_id")
     .where((eb) =>
       eb.not(
         eb.exists(
@@ -202,7 +203,14 @@ export async function getReviewQueueGroups() {
         ),
       ),
     )
-    .select(["bg.id as groupId", "p.r2_key_thumb as thumbKey", "p.taken_at as takenAt"])
+    .select([
+      "bg.id as groupId",
+      "p.r2_key_thumb as thumbKey",
+      "p.taken_at as takenAt",
+      "p.gps_lat as gpsLat",
+      "p.gps_lng as gpsLng",
+      "l.name as locationName",
+    ])
     .orderBy("p.taken_at", "desc")
     .execute();
 }
