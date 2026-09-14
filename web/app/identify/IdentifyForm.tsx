@@ -54,8 +54,10 @@ function resizeToJpeg(file: File): Promise<Blob> {
 }
 
 export function IdentifyForm() {
+  const [location, setLocation] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [result, setResult] = useState<IdentifyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +74,9 @@ export function IdentifyForm() {
       const jpeg = await resizeToJpeg(file);
       const formData = new FormData();
       formData.append("file", jpeg, "photo.jpg");
+      if (location.trim() !== "") {
+        formData.append("location", location.trim());
+      }
 
       const response = await fetch("/api/identify", { method: "POST", body: formData });
       const body = await response.json();
@@ -87,8 +92,59 @@ export function IdentifyForm() {
 
   return (
     <div className="flex flex-col gap-4">
-      <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 bg-zinc-100 px-6 py-10 text-center text-sm text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800">
-        <span>{submitting ? "Identifying…" : "Choose or take a photo"}</span>
+      <div>
+        <label htmlFor="location" className="mb-1 block text-sm text-zinc-500">
+          Location (optional)
+        </label>
+        <input
+          id="location"
+          type="text"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="e.g. Borneo, or South Africa"
+          disabled={submitting}
+          maxLength={200}
+          className="w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-zinc-700 dark:text-zinc-50"
+        />
+        <p className="mt-1 text-xs text-zinc-500">
+          Roughly where the photo was taken — a country or region is
+          enough. Without it, the AI tends to default toward whichever
+          similar-looking species is most common worldwide, so this
+          helps it rule out birds that don&apos;t actually occur there.
+        </p>
+      </div>
+
+      <label
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!submitting) setIsDragging(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          if (submitting) return;
+          const dropped = Array.from(e.dataTransfer.files).find((f) =>
+            f.type.startsWith("image/"),
+          );
+          handleFile(dropped);
+        }}
+        className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center text-sm transition-colors ${
+          isDragging
+            ? "border-blue-500 bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400"
+            : "border-zinc-300 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+        }`}
+      >
+        <span>
+          {submitting
+            ? "Identifying…"
+            : isDragging
+              ? "Drop to identify"
+              : "Choose, take, or drag and drop a photo"}
+        </span>
         <input
           type="file"
           accept="image/*"

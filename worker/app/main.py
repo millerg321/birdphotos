@@ -1,12 +1,17 @@
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
-from app.classification import SpeciesClassification, classify_photo_sync, get_anthropic_client
+from app.classification import (
+    ESCALATION_CLASSIFICATION_MODEL,
+    SpeciesClassification,
+    classify_photo_sync,
+    get_anthropic_client,
+)
 from app.db import get_db
 from app.jobs.classify_species import (
     classify_new_groups_sync,
@@ -326,12 +331,23 @@ def run_reclassify_group(
     return ReclassifyGroupResult(reclassified=True)
 
 
+# Free text from an anonymous, unauthenticated caller, so it's capped —
+# not a security boundary (it only ever reaches the classification
+# prompt, and the response is still validated against the
+# SpeciesClassification schema), just hygiene against someone pasting
+# an oversized block of text into what's meant to be "London, UK".
+MAX_LOCATION_HINT_LENGTH = 200
+
+
 @app.post(
     "/identify",
     dependencies=[Depends(require_internal_token)],
     response_model=SpeciesClassification,
 )
-async def identify_photo(file: UploadFile = File(...)) -> SpeciesClassification:  # noqa: B008
+async def identify_photo(
+    file: UploadFile = File(...),  # noqa: B008
+    location_hint: str | None = Form(default=None),  # noqa: B008
+) -> SpeciesClassification:
     """Backs the public, anonymous /identify page (see plan: ephemeral
     photo identification) — deliberately the only endpoint in this app
     with no `db` dependency at all. Nothing about the request is ever
@@ -340,9 +356,32 @@ async def identify_photo(file: UploadFile = File(...)) -> SpeciesClassification:
     but still the only thing allowed to reach this endpoint — gated by
     the same X-Internal-Token as every other job here — and is where
     rate limiting and a daily cost cap live, since this endpoint makes
-    a real (small) Anthropic API call per request. The web route
-    always sends a canvas-re-encoded JPEG, so media_type is fixed
-    rather than trusting a client-supplied content type."""
+    a real Anthropic API call per request. The web route always sends
+    a canvas-re-encoded JPEG, so media_type is fixed rather than
+    trusting a client-supplied content type.
+
+    location_hint is the same free-text hint build_classification_prompt
+    already supports for the owner's flow (app/locations.py
+    set_group_location) — optional here since an anonymous visitor may
+    not know or want to share it, unlike the owner's photos which
+    usually carry it via GPS EXIF or a manually assigned Location.
+
+    Uses ESCALATION_CLASSIFICATION_MODEL (Sonnet, not the default Haiku
+    used everywhere else) — this is the one classification path a
+    stranger's single result actually gets to see, so it's worth the
+    higher per-request cost; IDENTIFY_DAILY_CAP in web/lib/rateLimit.ts
+    is a request-count cap, not a dollar one, so it still bounds
+    worst-case spend regardless of which model is behind it, just at a
+    higher ceiling per request than the rest of the app.
+    """
+    if location_hint is not None:
+        location_hint = location_hint.strip()[:MAX_LOCATION_HINT_LENGTH] or None
     image_bytes = await file.read()
     client = get_anthropic_client()
-    return classify_photo_sync(client, image_bytes, media_type="image/jpeg")
+    return classify_photo_sync(
+        client,
+        image_bytes,
+        media_type="image/jpeg",
+        location_hint=location_hint,
+        model=ESCALATION_CLASSIFICATION_MODEL,
+    )

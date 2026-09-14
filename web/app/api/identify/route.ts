@@ -54,6 +54,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const workerForm = new FormData();
   workerForm.append("file", new Blob([bytes], { type: "image/jpeg" }), "photo.jpg");
 
+  // Optional — an anonymous visitor may not know or want to share it.
+  // Length capping happens worker-side too (app/main.py identify_photo);
+  // trimming here just avoids forwarding an empty field when the input
+  // was left blank or whitespace-only.
+  const location = formData.get("location");
+  if (typeof location === "string" && location.trim() !== "") {
+    workerForm.append("location_hint", location.trim());
+  }
+
   const response = await fetch(`${process.env.WORKER_BASE_URL}/identify`, {
     method: "POST",
     headers: { "X-Internal-Token": process.env.INTERNAL_API_TOKEN! },
