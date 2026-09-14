@@ -114,3 +114,15 @@ export async function setGroupLocationAction(
   revalidatePath(`/groups/${groupId}`);
   return { locationId: result.location_id, name: result.name };
 }
+
+// Manual escalation to a stronger model for one group whose default
+// (Haiku) classification came back poor — see worker/app/jobs/
+// classify_species.py reclassify_group_with_better_model. Replaces
+// this group's unreviewed suggestions with the new ones, so it stays
+// on /review afterward with the new candidates in place of the old.
+export async function reclassifyGroupAction(groupId: string): Promise<void> {
+  await requireSession();
+  await callWorker("/jobs/reclassify-group", { group_id: groupId });
+  revalidatePath("/review");
+  revalidatePath(`/groups/${groupId}`);
+}

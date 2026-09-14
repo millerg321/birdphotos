@@ -7,6 +7,7 @@ import {
   reopenForReviewAction,
 } from "@/lib/actions/reviewSpecies";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
+import { ReclassifyButton } from "./ReclassifyButton";
 
 // Same reasoning as app/gallery/page.tsx: DB queries and presigned URLs
 // aren't visible to Next's static/dynamic heuristics, and this page
@@ -123,6 +124,7 @@ export default async function ReviewPage() {
                     </button>
                   </form>
                 )}
+                <ReclassifyButton groupId={item.groupId} />
                 <form
                   action={addManualSpeciesAction.bind(null, item.groupId)}
                   className="flex items-center gap-2"

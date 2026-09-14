@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
 from app.db import get_db
-from app.jobs.classify_species import classify_new_groups_sync, clear_unreviewed_ai_suggestions
+from app.jobs.classify_species import (
+    classify_new_groups_sync,
+    clear_unreviewed_ai_suggestions,
+    reclassify_group_with_better_model,
+)
 from app.jobs.group_bursts import (
     backfill_scores,
     delete_group,
@@ -246,3 +250,35 @@ def run_set_group_location(
         lat=location.center_lat,
         lng=location.center_lng,
     )
+
+
+class ReclassifyGroupRequest(BaseModel):
+    group_id: UUID
+
+
+class ReclassifyGroupResult(BaseModel):
+    reclassified: bool
+
+
+@app.post(
+    "/jobs/reclassify-group",
+    dependencies=[Depends(require_internal_token)],
+    response_model=ReclassifyGroupResult,
+)
+def run_reclassify_group(
+    request: ReclassifyGroupRequest,
+    db: Session = Depends(get_db),  # noqa: B008 - idiomatic FastAPI dependency injection
+) -> ReclassifyGroupResult:
+    """Manual escalation to a stronger model (see plan: AI Species
+    Classification — "optional Sonnet-5 escalation for low-confidence
+    results") for a specific group whose default-model classification
+    came back poor — triggered from the review queue, not automatic."""
+    try:
+        reclassify_group_with_better_model(db, request.group_id)
+    except ValueError as e:
+        # Same reasoning as set-group-location: a real, expected failure
+        # mode a human can hit from the UI (e.g. the group somehow has
+        # no best shot yet), not a bug — surface the message.
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    db.commit()
+    return ReclassifyGroupResult(reclassified=True)

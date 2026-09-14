@@ -13,6 +13,13 @@ from app.config import settings
 # re-check pass without touching callers.
 CLASSIFICATION_MODEL = "claude-haiku-4-5"
 
+# The plan's stretch-goal "optional Sonnet-5 escalation for low-confidence
+# results" — brought forward as an on-demand per-group action (see
+# app/jobs/classify_species.py reclassify_group_with_better_model) rather
+# than an automatic blanket switch, since the point is a human judging a
+# specific bad Haiku result, not replacing Haiku everywhere (cost).
+ESCALATION_CLASSIFICATION_MODEL = "claude-sonnet-5"
+
 def build_classification_prompt(location_hint: str | None = None) -> str:
     """location_hint (e.g. "Borneo", "South Africa") makes a real difference:
     without it, classification tends to default toward whichever similar-
@@ -79,14 +86,18 @@ def classify_photo_sync(
     image_bytes: bytes,
     media_type: Literal["image/jpeg", "image/png", "image/gif", "image/webp"] = "image/webp",
     location_hint: str | None = None,
+    model: str = CLASSIFICATION_MODEL,
 ) -> SpeciesClassification:
     """Synchronous single-photo classification — used for the incremental
-    path (new imports going forward, see plan). The bulk backlog path
-    uses the Batch API instead (see app/jobs/classify_species.py), which
-    doesn't support client.messages.parse()'s convenience wrapper, so
-    that path builds the same schema as a raw json_schema instead."""
+    path (new imports going forward, see plan) and for the manual
+    Sonnet-escalation path (model=ESCALATION_CLASSIFICATION_MODEL, see
+    app/jobs/classify_species.py reclassify_group_with_better_model). The
+    bulk backlog path uses the Batch API instead (see
+    app/jobs/classify_species.py), which doesn't support
+    client.messages.parse()'s convenience wrapper, so that path builds
+    the same schema as a raw json_schema instead."""
     response = client.messages.parse(
-        model=CLASSIFICATION_MODEL,
+        model=model,
         max_tokens=1024,
         messages=[
             {

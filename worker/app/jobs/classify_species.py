@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.classification import (
     CLASSIFICATION_MODEL,
+    ESCALATION_CLASSIFICATION_MODEL,
     SpeciesClassification,
     build_classification_prompt,
     classify_photo_sync,
@@ -150,11 +151,7 @@ def submit_batch_classification(
         photo = db.get(Photo, best_shot_id)
         assert photo is not None
         image_bytes = download_bytes(photo.r2_key_medium)
-
-        location_hint = None
-        if photo.location_id is not None:
-            location = db.get(Location, photo.location_id)
-            location_hint = location.name if location is not None else None
+        location_hint = _location_hint_for_photo(db, photo)
 
         requests.append(
             Request(
@@ -219,11 +216,21 @@ def ingest_batch_results(db: Session, batch_id: str) -> int:
 
 
 def _insert_candidates(
-    db: Session, group_id: uuid.UUID, classification: SpeciesClassification
+    db: Session,
+    group_id: uuid.UUID,
+    classification: SpeciesClassification,
+    model: str = CLASSIFICATION_MODEL,
 ) -> None:
-    """Shared by ingest_batch_results and classify_new_groups_sync: one
-    burst_group_species row per candidate (source 'ai_suggested', status
-    'pending_review' — see app/queries.py get_effective_species)."""
+    """Shared by ingest_batch_results, classify_new_groups_sync, and
+    reclassify_group_with_better_model: one burst_group_species row per
+    candidate (source 'ai_suggested', status 'pending_review' — see
+    app/queries.py get_effective_species). model must be whichever model
+    actually produced this classification, not assumed from the default
+    — reclassify_group_with_better_model passes
+    ESCALATION_CLASSIFICATION_MODEL here; caught by testing that the
+    right model reached classify_photo_sync, but missed that this
+    function silently re-hardcoded CLASSIFICATION_MODEL regardless,
+    stamping every row's audit trail wrong."""
     for candidate in classification.candidates:
         species = get_or_create_species(db, candidate.common_name, candidate.scientific_name)
         db.add(
@@ -234,7 +241,7 @@ def _insert_candidates(
                 source="ai_suggested",
                 confidence=candidate.confidence,
                 status="pending_review",
-                model_id=CLASSIFICATION_MODEL,
+                model_id=model,
                 raw_response=classification.model_dump(),
             )
         )
@@ -272,11 +279,7 @@ def classify_new_groups_sync(db: Session) -> int:
         if photo is None:
             continue
         image_bytes = download_bytes(photo.r2_key_medium)
-
-        location_hint = None
-        if photo.location_id is not None:
-            location = db.get(Location, photo.location_id)
-            location_hint = location.name if location is not None else None
+        location_hint = _location_hint_for_photo(db, photo)
 
         classification = classify_photo_sync(client, image_bytes, "image/webp", location_hint)
         _insert_candidates(db, group.id, classification)
@@ -284,3 +287,48 @@ def classify_new_groups_sync(db: Session) -> int:
 
     db.flush()
     return classified
+
+
+def _location_hint_for_photo(db: Session, photo: Photo) -> str | None:
+    if photo.location_id is None:
+        return None
+    location = db.get(Location, photo.location_id)
+    return location.name if location is not None else None
+
+
+def reclassify_group_with_better_model(db: Session, group_id: uuid.UUID) -> None:
+    """Manual escalation for one group whose Haiku classification came
+    back poor (see plan: AI Species Classification — "optional Sonnet-5
+    escalation for low-confidence results", brought forward from a
+    stretch goal to an on-demand per-group action triggered from the
+    review queue, rather than an automatic blanket switch — the point is
+    a human judging one specific bad result, not paying Sonnet's cost
+    for every photo).
+
+    Clears this group's own unreviewed AI suggestions first (never a
+    confirmed one) so the Sonnet candidates replace them cleanly rather
+    than piling up in the review queue alongside the Haiku ones that
+    prompted the re-check.
+    """
+    group = db.get(BurstGroup, group_id)
+    if group is None:
+        raise ValueError("Group not found")
+
+    best_shot_id = group.best_shot_override_photo_id or group.best_shot_photo_id
+    if best_shot_id is None:
+        raise ValueError("Group has no best shot photo")
+    photo = db.get(Photo, best_shot_id)
+    if photo is None:
+        raise ValueError("Best shot photo not found")
+
+    location_hint = _location_hint_for_photo(db, photo)
+    image_bytes = download_bytes(photo.r2_key_medium)
+
+    clear_unreviewed_ai_suggestions(db, [group_id])
+
+    client = get_anthropic_client()
+    classification = classify_photo_sync(
+        client, image_bytes, "image/webp", location_hint, model=ESCALATION_CLASSIFICATION_MODEL
+    )
+    _insert_candidates(db, group_id, classification, model=ESCALATION_CLASSIFICATION_MODEL)
+    db.flush()

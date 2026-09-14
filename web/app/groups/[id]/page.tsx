@@ -17,7 +17,7 @@ import {
   removePhotoFromGroupAction,
 } from "@/lib/actions/manageGroups";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
-import { SubmitButton } from "./SubmitButton";
+import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmButton } from "./ConfirmButton";
 import { SetLocationForm } from "./SetLocationForm";
 

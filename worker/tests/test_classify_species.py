@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.orm import Session
 
-from app.classification import SpeciesClassification
+from app.classification import ESCALATION_CLASSIFICATION_MODEL, SpeciesClassification
 from app.jobs.classify_species import (
     _groups_needing_classification,
     _slugify,
@@ -13,6 +13,7 @@ from app.jobs.classify_species import (
     clear_unreviewed_ai_suggestions,
     get_or_create_species,
     ingest_batch_results,
+    reclassify_group_with_better_model,
     submit_batch_classification,
 )
 from app.locations import get_or_create_location
@@ -438,3 +439,172 @@ class TestClassifyNewGroupsSync:
             .all()
         )
         assert rows == []
+
+
+class TestReclassifyGroupWithBetterModel:
+    def test_inserts_new_candidates(self, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+        group = _make_group_with_photo(db)
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint, model: (
+                _barn_owl_classification()
+            ),
+        )
+
+        reclassify_group_with_better_model(db, group.id)
+
+        rows = (
+            db.query(BurstGroupSpecies)
+            .filter(BurstGroupSpecies.burst_group_id == group.id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].source == "ai_suggested"
+
+    def test_uses_the_escalation_model(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        group = _make_group_with_photo(db)
+
+        seen_models = []
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+
+        def fake_classify(client, image_bytes, media_type, location_hint, model):
+            seen_models.append(model)
+            return _barn_owl_classification()
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync", fake_classify
+        )
+
+        reclassify_group_with_better_model(db, group.id)
+
+        assert seen_models == [ESCALATION_CLASSIFICATION_MODEL]
+
+    def test_stamps_the_inserted_row_with_the_escalation_model(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not redundant with test_uses_the_escalation_model: that one
+        only checks what classify_photo_sync was called with. This
+        actually caught a real bug where _insert_candidates silently
+        re-hardcoded the default model regardless — the real Sonnet
+        request went out, but the DB row it produced was stamped
+        claude-haiku-4-5, making the audit trail wrong."""
+        group = _make_group_with_photo(db)
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint, model: (
+                _barn_owl_classification()
+            ),
+        )
+
+        reclassify_group_with_better_model(db, group.id)
+
+        row = (
+            db.query(BurstGroupSpecies)
+            .filter(BurstGroupSpecies.burst_group_id == group.id)
+            .one()
+        )
+        assert row.model_id == ESCALATION_CLASSIFICATION_MODEL
+
+    def test_clears_prior_unreviewed_suggestions_first(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        group = _make_group_with_photo(db)
+        stale_species = get_or_create_species(db, "Barred Owl", None)
+        db.add(
+            BurstGroupSpecies(
+                burst_group_id=group.id,
+                species_id=stale_species.id,
+                source="ai_suggested",
+                status="pending_review",
+                confidence=0.4,
+            )
+        )
+        db.flush()
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint, model: (
+                _barn_owl_classification()
+            ),
+        )
+
+        reclassify_group_with_better_model(db, group.id)
+
+        rows = (
+            db.query(BurstGroupSpecies)
+            .filter(BurstGroupSpecies.burst_group_id == group.id)
+            .all()
+        )
+        assert [r.species_id for r in rows] != [stale_species.id]
+
+    def test_never_clears_a_confirmed_candidate(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        group = _make_group_with_photo(db)
+        confirmed_species = get_or_create_species(db, "Snowy Owl", None)
+        confirmed = BurstGroupSpecies(
+            burst_group_id=group.id,
+            species_id=confirmed_species.id,
+            source="ai_suggested",
+            status="confirmed",
+            confidence=0.9,
+        )
+        db.add(confirmed)
+        db.flush()
+
+        monkeypatch.setattr(
+            "app.jobs.classify_species.download_bytes", lambda key: b"fake-bytes"
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.get_anthropic_client", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "app.jobs.classify_species.classify_photo_sync",
+            lambda client, image_bytes, media_type, location_hint, model: (
+                _barn_owl_classification()
+            ),
+        )
+
+        reclassify_group_with_better_model(db, group.id)
+
+        db.refresh(confirmed)
+        assert confirmed.status == "confirmed"
+
+    def test_rejects_an_unknown_group(self, db: Session) -> None:
+        with pytest.raises(ValueError):
+            reclassify_group_with_better_model(db, uuid.uuid4())
+
+    def test_rejects_a_group_with_no_best_shot(self, db: Session) -> None:
+        group = BurstGroup()
+        db.add(group)
+        db.flush()
+
+        with pytest.raises(ValueError):
+            reclassify_group_with_better_model(db, group.id)
