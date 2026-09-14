@@ -9,6 +9,7 @@ import {
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 import { hasValidGps } from "@/lib/formatExif";
 import { SetLocationForm } from "@/components/SetLocationForm";
+import { RescanButton } from "@/components/RescanButton";
 import { ReclassifyButton } from "./ReclassifyButton";
 
 // Same reasoning as app/gallery/page.tsx: DB queries and presigned URLs
@@ -42,9 +43,12 @@ export default async function ReviewPage() {
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-10 dark:bg-black">
-      <h1 className="mb-6 text-2xl font-semibold text-black dark:text-zinc-50">
-        Review ({items.length})
-      </h1>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
+          Review ({items.length})
+        </h1>
+        <RescanButton />
+      </div>
 
       {items.length === 0 && (
         <p className="text-zinc-500">Nothing waiting for review.</p>

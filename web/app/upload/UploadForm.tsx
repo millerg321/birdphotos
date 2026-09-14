@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { getUploadUrlAction, processUploadsAction, rescanAction } from "@/lib/actions/upload";
+import { getUploadUrlAction, processUploadsAction } from "@/lib/actions/upload";
+import { RescanButton } from "@/components/RescanButton";
 
 interface FileStatus {
   name: string;
@@ -13,24 +14,7 @@ export function UploadForm() {
   const [statuses, setStatuses] = useState<FileStatus[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
-  const [rescanning, setRescanning] = useState(false);
-  const [rescanResult, setRescanResult] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-
-  async function handleRescan() {
-    setRescanning(true);
-    setRescanResult(null);
-    try {
-      const result = await rescanAction();
-      setRescanResult(
-        `Scored ${result.scored}, ${result.groups} burst group(s) total, ` +
-          `${result.classified} newly classified`,
-      );
-    } catch (err) {
-      setRescanResult(err instanceof Error ? err.message : "Rescan failed");
-    }
-    setRescanning(false);
-  }
 
   async function handleFiles(fileList: File[]) {
     if (fileList.length === 0) {
@@ -187,17 +171,7 @@ export function UploadForm() {
           whole library, so run it once after a batch rather than after
           each photo.
         </p>
-        <button
-          type="button"
-          onClick={handleRescan}
-          disabled={rescanning}
-          className="rounded-md bg-zinc-200 px-3 py-1.5 text-sm text-black hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
-        >
-          {rescanning ? "Scoring, grouping & classifying…" : "Score, group & classify new photos"}
-        </button>
-        {rescanResult && (
-          <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">{rescanResult}</p>
-        )}
+        <RescanButton />
       </div>
     </div>
   );
