@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getGalleryGroups, getUnreviewedGalleryCount } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { hasValidGps } from "@/lib/formatExif";
+import { auth } from "@/lib/auth";
 
 // Next can't see the DB query or presigned-URL generation as "dynamic"
 // data (neither is a fetch() call), so without this it gets prerendered
@@ -9,17 +10,30 @@ import { hasValidGps } from "@/lib/formatExif";
 // that expire within the hour. Force per-request rendering instead.
 export const dynamic = "force-dynamic";
 
+// Public (see plan: ephemeral photo identification — /gallery is in
+// lib/publicPaths.ts's allow-list, so the proxy lets anonymous requests
+// reach this page at all) but dual-mode: this is the one page in the
+// app that renders differently rather than being all-or-nothing behind
+// auth, so it calls auth() itself. Anonymous visitors get thumbnail +
+// species + date only — no "Needs review" workflow affordance, no
+// upload link, no location-management badge. Clicking a card still
+// links to /groups/[id] either way; an anonymous visitor just gets
+// bounced to /login by the proxy's normal gate, same as hitting any
+// other protected URL directly.
 export default async function GalleryPage({
   searchParams,
 }: {
   searchParams: Promise<{ filter?: string }>;
 }) {
+  const session = await auth();
+  const isOwner = !!session?.user?.email;
+
   const { filter } = await searchParams;
-  const isUnreviewedFilter = filter === "unreviewed";
+  const isUnreviewedFilter = isOwner && filter === "unreviewed";
 
   const [groups, unreviewedCount] = await Promise.all([
     getGalleryGroups(isUnreviewedFilter ? "unreviewed" : undefined),
-    getUnreviewedGalleryCount(),
+    isOwner ? getUnreviewedGalleryCount() : Promise.resolve(0),
   ]);
   const cards = await Promise.all(
     groups.map(async (group) => ({
@@ -34,35 +48,39 @@ export default async function GalleryPage({
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
           Gallery
         </h1>
-        <Link
-          href="/upload"
-          className="text-sm text-blue-600 hover:underline dark:text-blue-400"
-        >
-          Upload photos
-        </Link>
+        {isOwner && (
+          <Link
+            href="/upload"
+            className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+          >
+            Upload photos
+          </Link>
+        )}
       </div>
-      <div className="mb-6 flex gap-4 text-sm">
-        <Link
-          href="/gallery"
-          className={
-            isUnreviewedFilter
-              ? "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
-              : "font-medium text-black dark:text-zinc-50"
-          }
-        >
-          All
-        </Link>
-        <Link
-          href="/gallery?filter=unreviewed"
-          className={
-            isUnreviewedFilter
-              ? "font-medium text-black dark:text-zinc-50"
-              : "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
-          }
-        >
-          Needs review{unreviewedCount > 0 ? ` (${unreviewedCount})` : ""}
-        </Link>
-      </div>
+      {isOwner && (
+        <div className="mb-6 flex gap-4 text-sm">
+          <Link
+            href="/gallery"
+            className={
+              isUnreviewedFilter
+                ? "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
+                : "font-medium text-black dark:text-zinc-50"
+            }
+          >
+            All
+          </Link>
+          <Link
+            href="/gallery?filter=unreviewed"
+            className={
+              isUnreviewedFilter
+                ? "font-medium text-black dark:text-zinc-50"
+                : "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
+            }
+          >
+            Needs review{unreviewedCount > 0 ? ` (${unreviewedCount})` : ""}
+          </Link>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {cards.map((card) => {
           const speciesLabel = card.speciesCommonName ?? card.speciesRawLabel ?? "Unreviewed";
@@ -91,7 +109,7 @@ export default async function GalleryPage({
                 </span>
               )}
 
-              {isMissingLocation && (
+              {isOwner && isMissingLocation && (
                 <span className="absolute top-1.5 left-1.5 rounded-full bg-amber-600/90 px-1.5 py-0.5 text-xs font-medium text-white">
                   No location
                 </span>

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const LINKS = [
+const PUBLIC_LINKS = [
+  { href: "/gallery", label: "Gallery" },
+  { href: "/identify", label: "Identify" },
+];
+
+const OWNER_LINKS = [
   { href: "/gallery", label: "Gallery" },
   { href: "/upload", label: "Upload" },
   { href: "/review", label: "Review" },
@@ -13,11 +18,18 @@ const LINKS = [
 // active link and hide itself on /login — there's nothing to navigate
 // to yet before signing in, and showing links to protected pages there
 // reads oddly on a screen that's otherwise just a sign-in button.
-export function Nav() {
+//
+// isOwner comes from the root layout (a Server Component, the only
+// place that can call auth()) rather than this component fetching its
+// own session — without it, an anonymous visitor would see Upload/
+// Review links that just bounce them to /login (see lib/publicPaths.ts).
+export function Nav({ isOwner }: { isOwner: boolean }) {
   const pathname = usePathname();
   if (pathname === "/login") {
     return null;
   }
+
+  const LINKS = isOwner ? OWNER_LINKS : PUBLIC_LINKS;
 
   return (
     <nav className="flex items-center gap-6 border-b border-zinc-200 bg-zinc-50 px-6 py-3 dark:border-zinc-800 dark:bg-black">

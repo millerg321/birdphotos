@@ -14,11 +14,24 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/s/abc123")).toBe(true);
   });
 
-  it("blocks the gallery", () => {
-    expect(isPublicPath("/gallery")).toBe(false);
+  it("allows the gallery", () => {
+    expect(isPublicPath("/gallery")).toBe(true);
+  });
+
+  it("allows the identify page and its API route", () => {
+    expect(isPublicPath("/identify")).toBe(true);
+    expect(isPublicPath("/api/identify")).toBe(true);
   });
 
   it("blocks the review queue", () => {
     expect(isPublicPath("/review")).toBe(false);
+  });
+
+  it("blocks the upload page", () => {
+    expect(isPublicPath("/upload")).toBe(false);
+  });
+
+  it("blocks group detail", () => {
+    expect(isPublicPath("/groups/abc123")).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Nav } from "@/components/Nav";
+import { auth } from "@/lib/auth";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,14 +19,17 @@ export const metadata: Metadata = {
   description: "Personal bird photography gallery",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const session = await auth();
+  const isOwner = !!session?.user?.email;
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Nav />
+        <Nav isOwner={isOwner} />
         {children}
       </body>
     </html>

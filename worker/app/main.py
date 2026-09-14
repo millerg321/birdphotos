@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
+from app.classification import SpeciesClassification, classify_photo_sync, get_anthropic_client
 from app.db import get_db
 from app.jobs.classify_species import (
     classify_new_groups_sync,
@@ -323,3 +324,25 @@ def run_reclassify_group(
         raise HTTPException(status_code=422, detail=str(e)) from e
     db.commit()
     return ReclassifyGroupResult(reclassified=True)
+
+
+@app.post(
+    "/identify",
+    dependencies=[Depends(require_internal_token)],
+    response_model=SpeciesClassification,
+)
+async def identify_photo(file: UploadFile = File(...)) -> SpeciesClassification:  # noqa: B008
+    """Backs the public, anonymous /identify page (see plan: ephemeral
+    photo identification) — deliberately the only endpoint in this app
+    with no `db` dependency at all. Nothing about the request is ever
+    persisted: no Photo, BurstGroup, or Species row, no R2 upload. The
+    caller (web/app/api/identify/route.ts) is itself unauthenticated,
+    but still the only thing allowed to reach this endpoint — gated by
+    the same X-Internal-Token as every other job here — and is where
+    rate limiting and a daily cost cap live, since this endpoint makes
+    a real (small) Anthropic API call per request. The web route
+    always sends a canvas-re-encoded JPEG, so media_type is fixed
+    rather than trusting a client-supplied content type."""
+    image_bytes = await file.read()
+    client = get_anthropic_client()
+    return classify_photo_sync(client, image_bytes, media_type="image/jpeg")
