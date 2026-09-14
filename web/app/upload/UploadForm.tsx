@@ -15,6 +15,7 @@ export function UploadForm() {
   const [summary, setSummary] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState(false);
   const [rescanResult, setRescanResult] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   async function handleRescan() {
     setRescanning(true);
@@ -31,11 +32,10 @@ export function UploadForm() {
     setRescanning(false);
   }
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) {
+  async function handleFiles(fileList: File[]) {
+    if (fileList.length === 0) {
       return;
     }
-    const fileList = Array.from(files);
     setSubmitting(true);
     setSummary(null);
     setStatuses(fileList.map((f) => ({ name: f.name, state: "pending" })));
@@ -114,15 +114,44 @@ export function UploadForm() {
 
   return (
     <div className="flex flex-col gap-4">
-      <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 bg-zinc-100 px-6 py-10 text-center text-sm text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800">
-        <span>Click to choose one or more photos</span>
+      <label
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!submitting) setIsDragging(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          if (submitting) return;
+          // dataTransfer.files has no accept="image/*" equivalent —
+          // filter to match what the file picker already restricts you
+          // to, rather than letting a dropped non-image quietly fail
+          // later in the upload/import pipeline.
+          const dropped = Array.from(e.dataTransfer.files).filter((f) =>
+            f.type.startsWith("image/"),
+          );
+          handleFiles(dropped);
+        }}
+        className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center text-sm transition-colors ${
+          isDragging
+            ? "border-blue-500 bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400"
+            : "border-zinc-300 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+        }`}
+      >
+        <span>
+          {isDragging ? "Drop to upload" : "Click to choose, or drag and drop, one or more photos"}
+        </span>
         <input
           type="file"
           multiple
           accept="image/*"
           disabled={submitting}
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => handleFiles(Array.from(e.target.files ?? []))}
         />
       </label>
 
