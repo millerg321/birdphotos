@@ -21,6 +21,18 @@ import { SubmitButton } from "./SubmitButton";
 import { ConfirmButton } from "./ConfirmButton";
 import { SetLocationForm } from "./SetLocationForm";
 
+// Guards against a data quirk, not just a hypothetical: some cameras/
+// apps write a literal 0/0 GPS rational when location was unavailable
+// rather than omitting the tag, and Pillow silently turns that into NaN
+// instead of raising (see worker/app/exif_utils.py _gps_to_decimal,
+// fixed there for new imports going forward). NaN survived into
+// Postgres for at least one already-imported photo — it's neither SQL
+// NULL nor JS null, so treat it explicitly as "no real GPS" here too,
+// or the manual location override never shows for that photo.
+function hasValidGps(lat: number | null, lng: number | null): boolean {
+  return lat !== null && lng !== null && !Number.isNaN(lat) && !Number.isNaN(lng);
+}
+
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
 // static params here anyway, but explicit is safer than relying on that).
 export const dynamic = "force-dynamic";
@@ -161,8 +173,8 @@ export default async function GroupDetailPage({
           <div>
             <dt className="text-zinc-500">Location</dt>
             <dd className="text-black dark:text-zinc-50">
-              {group.gpsLat !== null && group.gpsLng !== null ? (
-                `${group.gpsLat.toFixed(5)}, ${group.gpsLng.toFixed(5)}`
+              {hasValidGps(group.gpsLat, group.gpsLng) ? (
+                `${group.gpsLat!.toFixed(5)}, ${group.gpsLng!.toFixed(5)}`
               ) : (
                 <>
                   <span>{group.locationName ?? "—"}</span>

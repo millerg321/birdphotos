@@ -1,4 +1,5 @@
 import io
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -34,6 +35,15 @@ def _gps_to_decimal(coord: tuple, ref: str) -> float | None:
         return None
     degrees, minutes, seconds = (float(v) for v in coord)
     decimal = degrees + minutes / 60 + seconds / 3600
+    # A malformed GPS tag (some cameras/apps write a literal 0/0 rational
+    # when location was unavailable, rather than omitting the tag) comes
+    # back from Pillow's IFDRational as nan, not an exception or None —
+    # verified directly: float(IFDRational(0, 0)) == nan. nan is neither
+    # SQL NULL nor JS null downstream, which broke the web UI's "no GPS,
+    # show the manual location override" check (nan !== null is true) —
+    # treat it as "no GPS" here instead of ever storing it.
+    if math.isnan(decimal):
+        return None
     if ref in ("S", "W"):
         decimal = -decimal
     return decimal
