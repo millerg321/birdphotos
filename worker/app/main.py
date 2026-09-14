@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import require_internal_token
@@ -64,6 +65,12 @@ class BackfillAndGroupResult(BaseModel):
     classified: int
 
 
+# Arbitrary bigint identifying this job for a Postgres advisory lock —
+# any value works, it just has to stay constant across calls and not
+# collide with another lock use in this app (there isn't one yet).
+_BACKFILL_AND_GROUP_LOCK_KEY = 727100
+
+
 @app.post(
     "/jobs/backfill-and-group",
     dependencies=[Depends(require_internal_token)],
@@ -87,14 +94,48 @@ def run_backfill_and_group(
     Classification, cost control by construction). Uses
     classify_photo_sync rather than the Batch API's submit-then-poll
     (scripts/classify_backlog.py) since manual uploads are a small,
-    on-demand trickle, not a large one-off backlog."""
-    scored = backfill_scores(db)
-    db.commit()
-    groups = regroup_all(db)
-    db.commit()
-    classified = classify_new_groups_sync(db)
-    db.commit()
-    return BackfillAndGroupResult(scored=scored, groups=groups, classified=classified)
+    on-demand trickle, not a large one-off backlog.
+
+    Guarded by a Postgres session-level advisory lock (not the
+    transactional pg_advisory_xact_lock — this function's own three
+    db.commit() calls would release that before classify_new_groups_
+    sync even runs): a second concurrent call to this endpoint now
+    fails fast with 409 instead of racing the first. Real production
+    incident, not a hypothetical — classify_new_groups_sync decides
+    which groups still need classification from burst_group_species,
+    but nothing commits until this function's own commits, so two
+    overlapping requests (the "Score, group & classify" button is now
+    on both /upload and /review, and each request can take a while —
+    a real Anthropic API call per group) both saw the same groups as
+    unclassified and each inserted a full set of candidates, silently
+    doubling them (confirmed: paired rows, identical species_id, same
+    model, near- but not bitwise-identical confidence — two separate
+    API calls, 44 seconds apart). Duplicates from before this fix were
+    cleaned up by scripts/fix_duplicate_pending_candidates.py.
+    """
+    got_lock = db.execute(
+        text("SELECT pg_try_advisory_lock(:key)"), {"key": _BACKFILL_AND_GROUP_LOCK_KEY}
+    ).scalar()
+    if not got_lock:
+        raise HTTPException(
+            status_code=409, detail="A rescan is already running — try again shortly."
+        )
+    try:
+        scored = backfill_scores(db)
+        db.commit()
+        groups = regroup_all(db)
+        db.commit()
+        classified = classify_new_groups_sync(db)
+        db.commit()
+        return BackfillAndGroupResult(scored=scored, groups=groups, classified=classified)
+    finally:
+        # unlock_all, not unlocking just this key: a session-level
+        # lock outlives db.commit(), so it must be released explicitly
+        # before this connection goes back to SQLAlchemy's pool for
+        # reuse by an unrelated later request — unlock_all is a
+        # deliberate safety margin against ever leaking a held lock
+        # onto a pooled connection.
+        db.execute(text("SELECT pg_advisory_unlock_all()"))
 
 
 class MergeGroupsRequest(BaseModel):
