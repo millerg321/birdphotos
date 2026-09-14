@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 
@@ -5,7 +6,8 @@ from anthropic.types import TextBlockParam
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 from pydantic import ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.classification import (
@@ -19,6 +21,8 @@ from app.classification import (
 )
 from app.models import BurstGroup, BurstGroupSpecies, Location, Photo, Species
 from app.storage import download_bytes
+
+logger = logging.getLogger(__name__)
 
 # Hand-written rather than derived from SpeciesClassification.model_json_schema():
 # client.messages.parse() (used by the synchronous incremental path in
@@ -64,24 +68,51 @@ def _slugify(text: str) -> str:
 
 
 def get_or_create_species(db: Session, common_name: str, scientific_name: str | None) -> Species:
-    """Matches on lowercase common_name — the plan's "lighter v1" for
-    Phase 4, ahead of seeding a proper eBird taxonomy table. Accepts
-    some risk of near-duplicate species rows from inconsistent AI
-    phrasing; a human reviewing the /review queue can merge later."""
+    """Matches on common_name (case-insensitive) OR slug — the plan's
+    "lighter v1" for Phase 4, ahead of seeding a proper eBird taxonomy
+    table. Accepts some risk of near-duplicate species rows from
+    inconsistent AI phrasing; a human reviewing the /review queue can
+    merge later.
+
+    Checking slug too (not just common_name) mirrors web/lib/db/
+    queries.ts getOrCreateSpeciesId exactly, including why: slug
+    normalizes away punctuation/whitespace differences an exact-
+    modulo-case common_name match doesn't (e.g. "Common Wood-Pigeon"
+    vs "Common Wood Pigeon" slugify identically but wouldn't match on
+    ilike alone) — two AI-suggested names differing only that way used
+    to pass this check, then crash on the slug's unique constraint.
+    That TS-side version of this exact bug already happened and was
+    fixed once (see queries.ts's own comment about it); this — the
+    Python side, used by every AI classification path — never got the
+    same fix, and it crashed for real in production on a large batch
+    (more distinct species suggested at once raises the odds of a
+    collision). The nested transaction + except below is a second
+    line of defense for a same-slug race between two concurrent
+    inserts, which the upfront check can't rule out — same reasoning
+    as the TS version — and, unlike a plain try/except here, doesn't
+    abort the caller's whole transaction (this runs mid-loop, with
+    other groups' work already pending in the same session) if it
+    fires.
+    """
+    slug = _slugify(common_name)
     existing = db.execute(
-        select(Species).where(Species.common_name.ilike(common_name))
+        select(Species).where(
+            or_(Species.common_name.ilike(common_name), Species.slug == slug)
+        )
     ).scalar_one_or_none()
     if existing is not None:
         return existing
 
-    species = Species(
-        common_name=common_name,
-        scientific_name=scientific_name,
-        slug=_slugify(common_name),
-    )
-    db.add(species)
-    db.flush()
-    return species
+    try:
+        with db.begin_nested():
+            species = Species(
+                common_name=common_name, scientific_name=scientific_name, slug=slug
+            )
+            db.add(species)
+            db.flush()
+        return species
+    except IntegrityError:
+        return db.execute(select(Species).where(Species.slug == slug)).scalar_one()
 
 
 def _groups_needing_classification(db: Session) -> list[BurstGroup]:
@@ -208,7 +239,21 @@ def ingest_batch_results(db: Session, batch_id: str) -> int:
             # — skip this one group rather than losing the whole batch.
             continue
 
-        _insert_candidates(db, group_id, classification)
+        try:
+            with db.begin_nested():
+                _insert_candidates(db, group_id, classification)
+        except Exception:
+            # One group's insert failing (get_or_create_species's own
+            # race is now handled internally, but this stays as a
+            # general backstop) must not lose every other group's
+            # already-processed results in the same batch — see
+            # classify_new_groups_sync for the production incident this
+            # pattern was added in response to. Logged, not silent: the
+            # get_or_create_species crash that prompted this was only
+            # diagnosable because uvicorn's default unhandled-exception
+            # logging printed it.
+            logger.exception("Failed to ingest batch result for group %s", group_id)
+            continue
         ingested += 1
 
     db.flush()
@@ -264,6 +309,19 @@ def classify_new_groups_sync(db: Session) -> int:
     per the prompt's own instruction) gets no burst_group_species row
     and so will be retried on the next run — same behavior as the
     batch path, not something introduced here.
+
+    One group's failure (a bad image, an Anthropic API hiccup, a DB
+    conflict) doesn't abort the rest — each group's classification-and-
+    insert is isolated in its own try/except (the insert additionally
+    in a nested transaction/SAVEPOINT, since a DB-level failure would
+    otherwise poison the whole session's pending transaction, not just
+    that group's row). Real production incident, not a hypothetical:
+    with the isolation this fixes added, a get_or_create_species
+    species-slug collision (see that function's docstring) on one
+    group of a large batch took down the entire request — costing every
+    other group's already-successful classification in the same batch,
+    since nothing commits until run_backfill_and_group's final
+    db.commit() after this function returns.
     """
     groups = _groups_needing_classification(db)
     if not groups:
@@ -278,11 +336,17 @@ def classify_new_groups_sync(db: Session) -> int:
         photo = db.get(Photo, best_shot_id)
         if photo is None:
             continue
-        image_bytes = download_bytes(photo.r2_key_medium)
-        location_hint = _location_hint_for_photo(db, photo)
-
-        classification = classify_photo_sync(client, image_bytes, "image/webp", location_hint)
-        _insert_candidates(db, group.id, classification)
+        try:
+            image_bytes = download_bytes(photo.r2_key_medium)
+            location_hint = _location_hint_for_photo(db, photo)
+            classification = classify_photo_sync(
+                client, image_bytes, "image/webp", location_hint
+            )
+            with db.begin_nested():
+                _insert_candidates(db, group.id, classification)
+        except Exception:
+            logger.exception("Failed to classify group %s", group.id)
+            continue
         classified += 1
 
     db.flush()

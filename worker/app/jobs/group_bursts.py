@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from app.models import BurstGroup, BurstGroupSpecies, BurstGroupTag, Photo
 from app.scoring import compute_exposure, compute_phash, compute_sharpness
 from app.storage import download_bytes
 
+logger = logging.getLogger(__name__)
+
 
 def _non_null[T](value: T | None) -> T:
     """Narrows a nullable ORM column value for callers that already
@@ -27,19 +30,36 @@ def _non_null[T](value: T | None) -> T:
 def backfill_scores(db: Session) -> int:
     """Computes phash/sharpness/exposure for any photo missing them.
     Downloads the original from R2 since scoring needs real pixel data,
-    not just the thumbnail (see plan: Burst Detection)."""
+    not just the thumbnail (see plan: Burst Detection).
+
+    One photo's failure (corrupt/undecodable image, an R2 hiccup)
+    doesn't abort the rest of the batch — same reasoning as
+    classify_new_groups_sync's per-group isolation, added after a
+    similar unprotected loop there took down an entire large-batch
+    classify run in production. No savepoint needed here (unlike that
+    one): this only mutates already-tracked ORM attributes, nothing is
+    written to the DB until the single db.flush() at the end, so
+    there's no pending write to protect — just skip the photo, leaving
+    it to retry on the next run since it's still missing a phash.
+    """
     photos = db.execute(
         select(Photo).where(Photo.phash.is_(None))
     ).scalars().all()
 
+    scored = 0
     for photo in photos:
-        original = download_bytes(photo.r2_key_original)
-        photo.phash = compute_phash(original)
-        photo.sharpness_score = compute_sharpness(original)
-        photo.exposure_score = compute_exposure(original)
+        try:
+            original = download_bytes(photo.r2_key_original)
+            photo.phash = compute_phash(original)
+            photo.sharpness_score = compute_sharpness(original)
+            photo.exposure_score = compute_exposure(original)
+        except Exception:
+            logger.exception("Failed to score photo %s", photo.id)
+            continue
+        scored += 1
 
     db.flush()
-    return len(photos)
+    return scored
 
 
 def regroup_all(db: Session) -> int:

@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.classification import ESCALATION_CLASSIFICATION_MODEL, SpeciesClassification
@@ -65,6 +66,81 @@ class TestGetOrCreateSpecies:
         a = get_or_create_species(db, "Great Spotted Woodpecker", None)
         b = get_or_create_species(db, "Rose-ringed Parakeet", None)
         assert a.id != b.id
+
+    def test_matches_by_slug_when_common_name_differs_in_punctuation(
+        self, db: Session
+    ) -> None:
+        """The actual production crash, reproduced exactly (species,
+        names, and all): "Common Wood-Pigeon" vs "Common Wood Pigeon"
+        slugify identically but don't match on ilike(common_name)
+        alone, so the second call used to reach the insert and crash
+        on the slug's unique constraint instead of returning the
+        existing row. Against the pre-fix code this raised
+        IntegrityError rather than returning."""
+        first = get_or_create_species(db, "Common Wood-Pigeon", "Columba palumbus")
+        second = get_or_create_species(db, "Common Wood Pigeon", "Columba palumbus")
+        assert first.id == second.id
+
+    def test_survives_a_concurrent_same_slug_insert(self, db: Session, db_engine: Engine) -> None:
+        """Simulates the race the nested-transaction fallback exists
+        for: another session inserts the same slug between this call's
+        existence check and its own insert. A before_flush listener
+        (rather than patching db.flush directly, which also fires on
+        the unrelated autoflush of this function's own upfront
+        existence-check SELECT) inserts the "concurrent" row only once
+        this call's own Species with the same slug is actually pending,
+        i.e. right as get_or_create_species's nested-transaction flush
+        is about to happen — so the IntegrityError raised is real, not
+        mocked, and lands exactly where the fallback expects it.
+
+        The concurrent session is bound to db_engine (the shared
+        TEST_DATABASE_URL engine), not app.db.SessionLocal — that binds
+        to the real configured DATABASE_URL, a different database, so
+        using it here would both miss the intended conflict with this
+        test's own row and leak a stray row into whatever real database
+        is configured. Verified the hard way: an earlier version of this
+        test used SessionLocal and silently committed a leftover
+        "Common Wood Pigeon" species into the local dev database."""
+        from sqlalchemy import event
+        from sqlalchemy.orm import sessionmaker
+
+        OtherSession = sessionmaker(bind=db_engine)
+        fired = False
+
+        def insert_concurrent_row(
+            session: Session, flush_context: object, instances: object
+        ) -> None:
+            nonlocal fired
+            if fired:
+                return
+            pending = [
+                obj
+                for obj in session.new
+                if isinstance(obj, Species) and obj.slug == "common-wood-pigeon"
+            ]
+            if not pending:
+                return
+            fired = True
+            other = OtherSession()
+            try:
+                other.add(
+                    Species(
+                        common_name="Common Wood Pigeon",
+                        slug="common-wood-pigeon",
+                    )
+                )
+                other.commit()
+            finally:
+                other.close()
+
+        event.listen(db, "before_flush", insert_concurrent_row)
+        try:
+            species = get_or_create_species(db, "Common Wood-Pigeon", "Columba palumbus")
+        finally:
+            if event.contains(db, "before_flush", insert_concurrent_row):
+                event.remove(db, "before_flush", insert_concurrent_row)
+
+        assert species.slug == "common-wood-pigeon"
 
 
 class TestGroupsNeedingClassification:
