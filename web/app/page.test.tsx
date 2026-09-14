@@ -1,10 +1,14 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { redirect } from "next/navigation";
 import Home from "./page";
 
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(),
+}));
+
 describe("Home", () => {
-  it("renders the app heading", () => {
-    render(<Home />);
-    expect(screen.getByRole("heading", { name: "Bird Photos" })).toBeInTheDocument();
+  it("redirects to the gallery", () => {
+    Home();
+    expect(redirect).toHaveBeenCalledWith("/gallery");
   });
 });
