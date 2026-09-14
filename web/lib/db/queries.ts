@@ -12,8 +12,13 @@ const EFFECTIVE_BEST_SHOT = sql<boolean>`coalesce(bg.best_shot_override_photo_id
 // count (for the burst-count badge), and raw GPS/location fields (the
 // page applies hasValidGps + locationName itself, same as the group
 // detail page, rather than duplicating that decision here).
-export async function getGalleryGroups() {
-  return db
+//
+// filter: "unreviewed" restricts to groups with no confirmed species —
+// the exact same condition that makes a card show "Unreviewed" in the
+// first place, so the toggle only ever hides cards already labeled
+// that way, never something inconsistent with what's on screen.
+export async function getGalleryGroups(filter?: "unreviewed") {
+  let query = db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
     .leftJoin("locations as l", "l.id", "p.location_id")
@@ -56,9 +61,38 @@ export async function getGalleryGroups() {
         .select((eb2) => eb2.fn.countAll<number>().as("count"))
         .whereRef("p2.burst_group_id", "=", "bg.id")
         .as("photoCount"),
-    ])
-    .orderBy("p.taken_at", "desc")
-    .execute();
+    ]);
+
+  if (filter === "unreviewed") {
+    query = query.where("confirmed.burst_group_id", "is", null);
+  }
+
+  return query.orderBy("p.taken_at", "desc").execute();
+}
+
+// Powers the gallery's "Needs review (N)" toggle label regardless of
+// which tab is currently active — same "no confirmed candidate"
+// condition as getGalleryGroups's filter and getReviewQueueGroups,
+// kept as its own cheap count rather than requiring a second full
+// getGalleryGroups("unreviewed") fetch just to read cards.length.
+export async function getUnreviewedGalleryCount(): Promise<number> {
+  const row = await db
+    .selectFrom("burst_groups as bg")
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom("burst_group_species as bgs")
+            .select("bgs.id")
+            .whereRef("bgs.burst_group_id", "=", "bg.id")
+            .where("bgs.status", "=", "confirmed"),
+        ),
+      ),
+    )
+    .select((eb) => eb.fn.countAll<number>().as("count"))
+    .executeTakeFirst();
+
+  return row?.count ?? 0;
 }
 
 export async function getGroupDetail(groupId: string) {

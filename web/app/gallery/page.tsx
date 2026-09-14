@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getGalleryGroups } from "@/lib/db/queries";
+import { getGalleryGroups, getUnreviewedGalleryCount } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { hasValidGps } from "@/lib/formatExif";
 
@@ -9,8 +9,18 @@ import { hasValidGps } from "@/lib/formatExif";
 // that expire within the hour. Force per-request rendering instead.
 export const dynamic = "force-dynamic";
 
-export default async function GalleryPage() {
-  const groups = await getGalleryGroups();
+export default async function GalleryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>;
+}) {
+  const { filter } = await searchParams;
+  const isUnreviewedFilter = filter === "unreviewed";
+
+  const [groups, unreviewedCount] = await Promise.all([
+    getGalleryGroups(isUnreviewedFilter ? "unreviewed" : undefined),
+    getUnreviewedGalleryCount(),
+  ]);
   const cards = await Promise.all(
     groups.map(async (group) => ({
       ...group,
@@ -20,7 +30,7 @@ export default async function GalleryPage() {
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-10 dark:bg-black">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
           Gallery
         </h1>
@@ -29,6 +39,28 @@ export default async function GalleryPage() {
           className="text-sm text-blue-600 hover:underline dark:text-blue-400"
         >
           Upload photos
+        </Link>
+      </div>
+      <div className="mb-6 flex gap-4 text-sm">
+        <Link
+          href="/gallery"
+          className={
+            isUnreviewedFilter
+              ? "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
+              : "font-medium text-black dark:text-zinc-50"
+          }
+        >
+          All
+        </Link>
+        <Link
+          href="/gallery?filter=unreviewed"
+          className={
+            isUnreviewedFilter
+              ? "font-medium text-black dark:text-zinc-50"
+              : "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
+          }
+        >
+          Needs review{unreviewedCount > 0 ? ` (${unreviewedCount})` : ""}
         </Link>
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -73,7 +105,9 @@ export default async function GalleryPage() {
         })}
       </div>
       {cards.length === 0 && (
-        <p className="text-zinc-500">No photos yet.</p>
+        <p className="text-zinc-500">
+          {isUnreviewedFilter ? "Nothing needs review." : "No photos yet."}
+        </p>
       )}
     </main>
   );
