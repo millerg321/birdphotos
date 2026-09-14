@@ -37,6 +37,25 @@ function getRatelimit(): Ratelimit {
   return ratelimit;
 }
 
+// Vercel's x-forwarded-for, observed in production, isn't a bare IP —
+// it can carry a trailing :port (e.g. "95.45.13.96:497060"), and that
+// suffix is NOT a fresh per-request ephemeral port: two real, unrelated
+// requests produced two DIFFERENT ports for the same IP, then a third
+// request landed on one of those exact same ip:port keys again —
+// meaning the raw header value was being used directly as the rate-
+// limit identifier, so unrelated visitors could exhaust each other's
+// limit (or, just as bad, each get a fresh key every time and never be
+// limited at all, depending on how that suffix happens to land). Strip
+// it so the identifier is the IP alone, which is what "per-IP" means.
+// A trailing :digits is stripped whether the address is IPv4 or bare
+// IPv6 (e.g. "::1:497060" -> "::1") — the ambiguity that creates for a
+// real bracket-less IPv6 address ending in a decimal-looking hex group
+// is an acceptable tradeoff here, since this only needs to be "good
+// enough" to identify a rate-limit peer, not a general-purpose parser.
+export function extractClientIp(forwardedFor: string | null): string {
+  return forwardedFor?.split(",")[0]?.trim().replace(/:\d+$/, "") ?? "unknown";
+}
+
 // Fails closed on any Redis error: this is the abuse/budget backstop for
 // a real per-request Anthropic API call, so an outage here should block
 // requests rather than silently let them all through.

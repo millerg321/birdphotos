@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkDailyCap, checkIdentifyRateLimit } from "@/lib/rateLimit";
+import { checkDailyCap, checkIdentifyRateLimit, extractClientIp } from "@/lib/rateLimit";
 
 // Anonymous, unauthenticated by design (see plan: ephemeral photo
 // identification) — this is the only Next.js entry point that lets the
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = extractClientIp(request.headers.get("x-forwarded-for"));
   if (!(await checkIdentifyRateLimit(ip))) {
     return NextResponse.json(
       { error: "Too many requests — try again in a bit." },

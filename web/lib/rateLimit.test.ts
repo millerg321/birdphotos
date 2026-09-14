@@ -28,6 +28,37 @@ vi.mock("@upstash/redis", () => ({
   Redis: { fromEnv: fromEnvMock },
 }));
 
+describe("extractClientIp", () => {
+  // Real production bug: Vercel's x-forwarded-for carried a trailing
+  // :port that wasn't a fresh per-request value, so using the raw
+  // header as the rate-limit identifier let unrelated visitors collide.
+  // See lib/rateLimit.ts's comment above extractClientIp.
+  it("strips a trailing port from an IPv4 address", async () => {
+    const { extractClientIp } = await import("./rateLimit");
+    expect(extractClientIp("95.45.13.96:497060")).toBe("95.45.13.96");
+  });
+
+  it("strips a trailing port from a bare IPv6 address", async () => {
+    const { extractClientIp } = await import("./rateLimit");
+    expect(extractClientIp("::1:497060")).toBe("::1");
+  });
+
+  it("takes the first entry when there's a proxy chain", async () => {
+    const { extractClientIp } = await import("./rateLimit");
+    expect(extractClientIp("95.45.13.96:497060, 10.0.0.1")).toBe("95.45.13.96");
+  });
+
+  it("passes through an address with no port unchanged", async () => {
+    const { extractClientIp } = await import("./rateLimit");
+    expect(extractClientIp("95.45.13.96")).toBe("95.45.13.96");
+  });
+
+  it("falls back to \"unknown\" when there's no header", async () => {
+    const { extractClientIp } = await import("./rateLimit");
+    expect(extractClientIp(null)).toBe("unknown");
+  });
+});
+
 describe("checkIdentifyRateLimit", () => {
   beforeEach(() => {
     limitMock.mockReset();
