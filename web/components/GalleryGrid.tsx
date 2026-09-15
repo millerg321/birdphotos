@@ -167,20 +167,30 @@ export function GalleryGrid({
                 the thumbnail's native pixel size is small, so without a
                 stable box around it the image rendered at that small
                 native size, then visibly jumped to fill the screen once
-                the much-bigger medium image loaded and replaced it. Both
-                images now render into the same box via object-contain, so
-                only their sharpness changes when the swap happens, not
-                their apparent size — the thumbnail gets a blur while it's
-                standing in, which clears once the real image is ready. */}
+                the much-bigger medium image loaded and replaced it.
+                While loading, this shows a plain spinner rather than the
+                thumbnail blurred-and-stretched to fill the box — tried
+                that first, but blurring a small image blown up this
+                large is a genuinely expensive GPU operation, and it
+                turned a load that used to be barely noticeable into a
+                visibly slower, janky one. A spinner costs nothing to
+                render and doesn't call attention to image quality at
+                all; the sharp image just appears once it's ready. */}
             <div className="flex h-[70vh] w-full items-center justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
-              <img
-                src={mediumUrl ?? cards[openIndex].thumbUrl}
-                alt=""
-                className={`max-h-full max-w-full rounded-lg object-contain transition-[filter] duration-200 ${
-                  mediumUrl ? "" : "blur-sm"
-                }`}
-              />
+              {mediumUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL
+                <img
+                  src={mediumUrl}
+                  alt=""
+                  className="max-h-full max-w-full rounded-lg object-contain"
+                />
+              ) : (
+                <div
+                  role="status"
+                  aria-label="Loading"
+                  className="h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white"
+                />
+              )}
             </div>
             <div className="flex items-center gap-4 text-sm text-white">
               <span>{cards[openIndex].speciesLabel}</span>
