@@ -79,3 +79,44 @@ class TestImportFromStagedUpload:
 
         after = db.execute(select(Photo)).scalars().all()
         assert len(after) == len(before)
+
+    def test_reimporting_the_same_file_is_rejected(
+        self, db: Session, fake_r2: dict[str, bytes]
+    ) -> None:
+        # Two different staging keys, identical bytes — matches how two
+        # separate browser uploads of the same file actually look
+        # (getUploadUrlAction mints a fresh random key per upload
+        # regardless of content).
+        bytes_ = _jpeg_bytes()
+        fake_r2["uploads/first.jpg"] = bytes_
+        fake_r2["uploads/second.jpg"] = bytes_
+
+        first = import_from_staged_upload(db, "uploads/first.jpg")
+        second = import_from_staged_upload(db, "uploads/second.jpg")
+
+        assert first.error is None
+        assert second.photo_id is None
+        assert second.error is not None
+        assert "already" in second.error
+
+        photos = db.execute(select(Photo)).scalars().all()
+        assert len(photos) == 1
+
+    def test_different_photos_both_import(
+        self, db: Session, fake_r2: dict[str, bytes]
+    ) -> None:
+        arr_a = np.full((100, 100, 3), 64, dtype=np.uint8)
+        buf_a = io.BytesIO()
+        Image.fromarray(arr_a).save(buf_a, format="JPEG")
+        arr_b = np.full((100, 100, 3), 192, dtype=np.uint8)
+        buf_b = io.BytesIO()
+        Image.fromarray(arr_b).save(buf_b, format="JPEG")
+        fake_r2["uploads/a.jpg"] = buf_a.getvalue()
+        fake_r2["uploads/b.jpg"] = buf_b.getvalue()
+
+        first = import_from_staged_upload(db, "uploads/a.jpg")
+        second = import_from_staged_upload(db, "uploads/b.jpg")
+
+        assert first.error is None
+        assert second.error is None
+        assert first.photo_id != second.photo_id

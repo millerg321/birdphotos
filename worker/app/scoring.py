@@ -1,9 +1,21 @@
+import hashlib
 import io
 
 import cv2
 import imagehash
 import numpy as np
 from PIL import Image
+
+
+def compute_content_hash(image_bytes: bytes) -> str:
+    """Exact-duplicate fingerprint (see plan: prevent duplicate photos) —
+    a plain cryptographic hash of the raw file bytes, unlike compute_phash
+    below, which is perceptual and only used for burst-grouping near-
+    identical shots taken close together in time. Two different files of
+    the same subject (a re-export, a resize) hash completely differently
+    here; that's intentional — this only catches literally the same file
+    uploaded twice."""
+    return hashlib.sha256(image_bytes).hexdigest()
 
 
 def compute_phash(image_bytes: bytes) -> str:

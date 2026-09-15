@@ -89,6 +89,7 @@ export interface Photos {
   burst_group_id: string;
   camera_make: string | null;
   camera_model: string | null;
+  content_hash: string | null;
   created_at: Generated<Timestamp>;
   exposure_score: number | null;
   focal_length_mm: number | null;

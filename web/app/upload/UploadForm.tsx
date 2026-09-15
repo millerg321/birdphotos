@@ -65,9 +65,18 @@ export function UploadForm() {
         const errorsByKey = new Map(result.errors.map((e) => [e.r2Key, e.error]));
         // Map processing results back onto the uploaded (non-error) files,
         // in the same order they were sent to processUploadsAction.
-        let uploadedIdx = 0;
-        setStatuses((prev) =>
-          prev.map((s) => {
+        // uploadedIdx is declared *inside* the updater (not closed over
+        // from outside) so it resets on every call — React Strict Mode
+        // deliberately double-invokes setState updaters in dev to catch
+        // exactly the impurity a shared outer counter would have: the
+        // second invocation would see uploadedIdx already advanced from
+        // the first, discarded run, walk uploadedKeys one index ahead of
+        // where it should be, and silently mark a genuinely-failed file
+        // as "done" (errorsByKey.get() on the wrong/undefined key just
+        // falls through to the success branch).
+        setStatuses((prev) => {
+          let uploadedIdx = 0;
+          return prev.map((s) => {
             if (s.state !== "processing") {
               return s;
             }
@@ -75,8 +84,8 @@ export function UploadForm() {
             uploadedIdx += 1;
             const error = errorsByKey.get(key);
             return error ? { ...s, state: "error", error } : { ...s, state: "done" };
-          }),
-        );
+          });
+        });
         setSummary(
           `${result.imported} photo${result.imported === 1 ? "" : "s"} imported` +
             (result.errors.length > 0 ? `, ${result.errors.length} failed` : ""),

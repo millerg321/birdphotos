@@ -94,6 +94,15 @@ class Photo(Base):
     sharpness_score: Mapped[float | None]
     exposure_score: Mapped[float | None]
 
+    # SHA-256 of the original file's raw bytes (see plan: prevent duplicate
+    # photos) — distinct from phash above, which is perceptual and only
+    # used for burst-grouping near-identical shots taken close together in
+    # time. This catches literally re-uploading the same file. Nullable so
+    # existing rows can stay unbackfilled (scripts/backfill_content_hashes.py)
+    # without violating the unique constraint — Postgres treats NULLs as
+    # distinct from each other under a unique index.
+    content_hash: Mapped[str | None] = mapped_column(String, unique=True, index=True)
+
     # Set by a manual group merge (see plan: manual upload / grouping
     # overrides) and checked by regroup_all, which otherwise recomputes
     # every group from scratch off phash/time on every run — without this,
