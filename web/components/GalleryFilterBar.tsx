@@ -52,6 +52,17 @@ export function GalleryFilterBar({
         aria-label="To date"
         className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
       />
+      <select
+        value={current.sort ?? "newest"}
+        onChange={(e) => update({ sort: e.target.value === "newest" ? null : e.target.value })}
+        aria-label="Sort by"
+        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
+      >
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="sharpest">Sharpest</option>
+        <option value="most-photos">Most photos</option>
+      </select>
       {hasActiveFilter && (
         <button
           type="button"

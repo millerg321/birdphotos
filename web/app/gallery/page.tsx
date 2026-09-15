@@ -26,21 +26,35 @@ export const dynamic = "force-dynamic";
 // links to /groups/[id] either way; an anonymous visitor just gets
 // bounced to /login by the proxy's normal gate, same as hitting any
 // other protected URL directly.
+const SORT_OPTIONS = ["newest", "oldest", "sharpest", "most-photos"] as const;
+type SortOption = (typeof SORT_OPTIONS)[number];
+function isSortOption(value: string | undefined): value is SortOption {
+  return !!value && (SORT_OPTIONS as readonly string[]).includes(value);
+}
+
 export default async function GalleryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string; species?: string; from?: string; to?: string }>;
+  searchParams: Promise<{
+    filter?: string;
+    species?: string;
+    from?: string;
+    to?: string;
+    sort?: string;
+  }>;
 }) {
   const session = await auth();
   const isOwner = !!session?.user?.email;
 
   const params = await searchParams;
   const isUnreviewedFilter = isOwner && params.filter === "unreviewed";
+  const sort = isSortOption(params.sort) ? params.sort : undefined;
   const currentFilters = {
     filter: isUnreviewedFilter ? "unreviewed" : null,
     species: params.species ?? null,
     from: params.from ?? null,
     to: params.to ?? null,
+    sort: sort ?? null,
   };
   const hasActiveFilter = !!(currentFilters.species || currentFilters.from || currentFilters.to);
 
@@ -50,6 +64,7 @@ export default async function GalleryPage({
       speciesSlug: params.species,
       from: params.from,
       to: params.to,
+      sort,
     }),
     isOwner ? getUnreviewedGalleryCount() : Promise.resolve(0),
     getConfirmedSpeciesList(),

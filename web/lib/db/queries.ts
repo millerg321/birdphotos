@@ -11,6 +11,7 @@ export interface GalleryGroupsFilter {
   speciesSlug?: string;
   from?: string;
   to?: string;
+  sort?: "newest" | "oldest" | "sharpest" | "most-photos";
 }
 
 // Enriched for the gallery cards: confirmed species (null on both
@@ -90,7 +91,28 @@ export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
     query = query.where("p.taken_at", "<", to);
   }
 
-  return query.orderBy("p.taken_at", "desc").execute();
+  switch (filter.sort) {
+    case "oldest":
+      query = query.orderBy("p.taken_at", "asc");
+      break;
+    case "sharpest":
+      // Raw sql, not Kysely's typed orderBy: not every photo has this
+      // scored yet (only after backfill_scores has run), and Postgres
+      // defaults DESC to NULLS FIRST, which would wrongly push every
+      // unscored photo to the very top.
+      query = query.orderBy(sql`p.sharpness_score desc nulls last`);
+      break;
+    case "most-photos":
+      // photoCount is a subquery-computed select alias, not a table
+      // column — ordering by it still needs a raw fragment rather than
+      // Kysely's typed orderBy.
+      query = query.orderBy(sql`"photoCount" desc`);
+      break;
+    default:
+      query = query.orderBy("p.taken_at", "desc");
+  }
+
+  return query.execute();
 }
 
 // Powers the species filter dropdown (see plan: gallery filtering) —

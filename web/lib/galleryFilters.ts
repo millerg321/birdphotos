@@ -3,6 +3,7 @@ export interface GalleryFilters {
   species?: string | null;
   from?: string | null;
   to?: string | null;
+  sort?: string | null;
 }
 
 // Kept out of GalleryFilterBar.tsx deliberately: that file is "use

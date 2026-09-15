@@ -35,4 +35,15 @@ describe("buildFilterUrl", () => {
       "/gallery?filter=unreviewed",
     );
   });
+
+  it("sort behaves like any other param — set, preserved, and clearable", () => {
+    expect(buildFilterUrl({}, { sort: "sharpest" })).toBe("/gallery?sort=sharpest");
+
+    const current = { species: "eurasian-blue-tit", sort: "sharpest" };
+    // Clearing species doesn't touch sort — "Clear filters" only clears
+    // species/from/to (see GalleryFilterBar.tsx), sort is "how it's
+    // ordered," not "what's shown."
+    expect(buildFilterUrl(current, { species: null })).toBe("/gallery?sort=sharpest");
+    expect(buildFilterUrl(current, { sort: null })).toBe("/gallery?species=eurasian-blue-tit");
+  });
 });
