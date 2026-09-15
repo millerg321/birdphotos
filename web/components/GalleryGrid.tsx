@@ -160,15 +160,28 @@ export function GalleryGrid({
           </button>
 
           <div
-            className="flex max-h-full max-w-4xl flex-col items-center gap-3"
+            className="flex max-h-full w-full max-w-4xl flex-col items-center gap-3"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
-            <img
-              src={mediumUrl ?? cards[openIndex].thumbUrl}
-              alt=""
-              className="max-h-[80vh] max-w-full rounded-lg object-contain"
-            />
+            {/* Fixed-size box, not just a max-* bound on the <img> itself:
+                the thumbnail's native pixel size is small, so without a
+                stable box around it the image rendered at that small
+                native size, then visibly jumped to fill the screen once
+                the much-bigger medium image loaded and replaced it. Both
+                images now render into the same box via object-contain, so
+                only their sharpness changes when the swap happens, not
+                their apparent size — the thumbnail gets a blur while it's
+                standing in, which clears once the real image is ready. */}
+            <div className="flex h-[70vh] w-full items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
+              <img
+                src={mediumUrl ?? cards[openIndex].thumbUrl}
+                alt=""
+                className={`max-h-full max-w-full rounded-lg object-contain transition-[filter] duration-200 ${
+                  mediumUrl ? "" : "blur-sm"
+                }`}
+              />
+            </div>
             <div className="flex items-center gap-4 text-sm text-white">
               <span>{cards[openIndex].speciesLabel}</span>
               <Link
