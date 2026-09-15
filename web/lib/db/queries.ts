@@ -115,6 +115,24 @@ export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
   return query.execute();
 }
 
+// Powers the gallery lightbox's lazy-loaded larger image (see plan:
+// gallery lightbox) — cards only ever carry a signed thumbnail URL
+// (getGalleryGroups), since presigning a medium URL for every card on
+// every gallery load would be wasted work at any real library size;
+// this looks up just the one key needed, on demand, when the lightbox
+// actually opens for a given group. Does its own DB lookup via the
+// same EFFECTIVE_BEST_SHOT join as everywhere else in this file,
+// rather than trusting a client-supplied key.
+export async function getGroupMediumKey(groupId: string): Promise<string | null> {
+  const row = await db
+    .selectFrom("burst_groups as bg")
+    .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
+    .where("bg.id", "=", groupId)
+    .select("p.r2_key_medium as mediumKey")
+    .executeTakeFirst();
+  return row?.mediumKey ?? null;
+}
+
 // Powers the species filter dropdown (see plan: gallery filtering) —
 // only species with an actual matched Species row (i.e. bgs.species_id
 // is set), same scope as everywhere else a "which species" identity is
