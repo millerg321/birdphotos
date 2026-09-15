@@ -149,6 +149,18 @@ export async function getConfirmedSpeciesList() {
     .execute();
 }
 
+// Powers location autocomplete (see plan: location autocomplete) — the
+// `locations` table is small and barely changes (a personal library has
+// a handful to a few dozen distinct places, already deduplicated by name
+// via get_or_create_location, worker/app/locations.py), so this is
+// fetched once per page load and filtered client-side as the user
+// types, the same "small reference list, no per-keystroke network call"
+// shape as getConfirmedSpeciesList above.
+export async function getKnownLocationNames(): Promise<string[]> {
+  const rows = await db.selectFrom("locations").select("name").orderBy("name").execute();
+  return rows.map((r) => r.name);
+}
+
 // Powers the gallery's "Needs review (N)" toggle label regardless of
 // which tab is currently active — same "no confirmed candidate"
 // condition as getGalleryGroups's unreviewed filter and

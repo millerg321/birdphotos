@@ -2,27 +2,29 @@
 
 import { useState, type FormEvent } from "react";
 import { setGroupLocationAction } from "@/lib/actions/manageGroups";
+import { LocationAutocomplete } from "@/components/LocationAutocomplete";
 
 // A client component (not a plain <form action={...}>) so a bad place
 // name — Nominatim finding nothing — can show an inline error instead
 // of crashing to Next.js's default error page (see
 // worker/app/locations.py set_group_location, which raises ValueError
 // in that case).
-export function SetLocationForm({ groupId }: { groupId: string }) {
+export function SetLocationForm({
+  groupId,
+  knownLocations,
+}: {
+  groupId: string;
+  knownLocations: string[];
+}) {
   const [placeName, setPlaceName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = placeName.trim();
-    if (!trimmed) {
-      return;
-    }
+  async function submit(name: string) {
     setSubmitting(true);
     setError(null);
     try {
-      await setGroupLocationAction(groupId, trimmed);
+      await setGroupLocationAction(groupId, name);
       setPlaceName("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not set location");
@@ -30,12 +32,24 @@ export function SetLocationForm({ groupId }: { groupId: string }) {
     setSubmitting(false);
   }
 
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = placeName.trim();
+    if (!trimmed) {
+      return;
+    }
+    await submit(trimmed);
+  }
+
   return (
     <form onSubmit={handleSubmit} className="mt-1 flex flex-wrap items-center gap-2">
-      <input
-        type="text"
+      <LocationAutocomplete
         value={placeName}
-        onChange={(e) => setPlaceName(e.target.value)}
+        onValueChange={setPlaceName}
+        // Saves immediately on selection — one less click, and the name
+        // is already known-good (it geocoded successfully before).
+        onSelect={submit}
+        options={knownLocations}
         placeholder="e.g. London, UK"
         disabled={submitting}
         className="rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-xs text-black placeholder:text-zinc-400 dark:border-zinc-700 dark:text-zinc-50"

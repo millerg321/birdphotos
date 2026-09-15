@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
+import { LocationAutocomplete } from "@/components/LocationAutocomplete";
 
 interface Candidate {
   common_name: string;
@@ -53,7 +54,7 @@ function resizeToJpeg(file: File): Promise<Blob> {
   });
 }
 
-export function IdentifyForm() {
+export function IdentifyForm({ knownLocations }: { knownLocations: string[] }) {
   const [location, setLocation] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -96,11 +97,12 @@ export function IdentifyForm() {
         <label htmlFor="location" className="mb-1 block text-sm text-zinc-500">
           Location (optional)
         </label>
-        <input
+        <LocationAutocomplete
           id="location"
-          type="text"
           value={location}
-          onChange={(e) => setLocation(e.target.value)}
+          onValueChange={setLocation}
+          onSelect={setLocation}
+          options={knownLocations}
           placeholder="e.g. Borneo, or South Africa"
           disabled={submitting}
           maxLength={200}

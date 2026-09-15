@@ -1,6 +1,12 @@
+import { getKnownLocationNames } from "@/lib/db/queries";
 import { IdentifyForm } from "./IdentifyForm";
 
-export default function IdentifyPage() {
+// Public (see lib/publicPaths.ts) — getKnownLocationNames just returns
+// place names already used elsewhere in the library (e.g. "London, UK"),
+// not anything sensitive, same reasoning as /gallery's own public data.
+export default async function IdentifyPage() {
+  const knownLocations = await getKnownLocationNames();
+
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col gap-6 bg-zinc-50 px-6 py-10 dark:bg-black">
       <div>
@@ -12,7 +18,7 @@ export default function IdentifyPage() {
           here is saved.
         </p>
       </div>
-      <IdentifyForm />
+      <IdentifyForm knownLocations={knownLocations} />
     </main>
   );
 }

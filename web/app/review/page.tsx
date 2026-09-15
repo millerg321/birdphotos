@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getGroupCandidates, getReviewQueueGroups } from "@/lib/db/queries";
+import { getGroupCandidates, getKnownLocationNames, getReviewQueueGroups } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import {
   addManualSpeciesAction,
@@ -23,7 +23,10 @@ function formatCandidateLabel(commonName: string | null, rawLabel: string | null
 }
 
 export default async function ReviewPage() {
-  const groups = await getReviewQueueGroups();
+  const [groups, knownLocations] = await Promise.all([
+    getReviewQueueGroups(),
+    getKnownLocationNames(),
+  ]);
 
   const items = await Promise.all(
     groups.map(async (group) => {
@@ -81,7 +84,7 @@ export default async function ReviewPage() {
               {!hasValidGps(item.gpsLat, item.gpsLng) && (
                 <div className="text-sm text-zinc-500">
                   <span>{item.locationName ?? "No location"}</span>
-                  <SetLocationForm groupId={item.groupId} />
+                  <SetLocationForm groupId={item.groupId} knownLocations={knownLocations} />
                 </div>
               )}
 

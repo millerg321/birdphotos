@@ -5,6 +5,7 @@ import {
   getConfirmedCandidate,
   getGroupDetail,
   getGroupPhotos,
+  getKnownLocationNames,
 } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { formatCamera, formatExposure, hasValidGps } from "@/lib/formatExif";
@@ -37,7 +38,7 @@ export default async function GroupDetailPage({
   }
 
   const photos = await getGroupPhotos(id);
-  const [mediumUrl, filmstrip, confirmedCandidate, adjacent] = await Promise.all([
+  const [mediumUrl, filmstrip, confirmedCandidate, adjacent, knownLocations] = await Promise.all([
     getSignedImageUrl(group.mediumKey),
     Promise.all(
       photos.map(async (photo) => ({
@@ -47,6 +48,7 @@ export default async function GroupDetailPage({
     ),
     getConfirmedCandidate(id),
     getAdjacentGroupIds(id, group.takenAt),
+    getKnownLocationNames(),
   ]);
 
   const [prevGroupPhotoCount, nextGroupPhotoCount, prevThumbUrl, nextThumbUrl] =
@@ -174,7 +176,7 @@ export default async function GroupDetailPage({
               ) : (
                 <>
                   <span>{group.locationName ?? "—"}</span>
-                  <SetLocationForm groupId={id} />
+                  <SetLocationForm groupId={id} knownLocations={knownLocations} />
                 </>
               )}
             </dd>
