@@ -120,9 +120,17 @@ export default async function GroupDetailPage({
                   </form>
                 </div>
               ) : (
-                <Link href="/review" className="text-blue-600 hover:underline dark:text-blue-400">
+                // A plain <a>, not <Link>: Next's client-side transition
+                // (pushState) never triggers the browser's :target match
+                // that /review's highlight relies on (see that page's
+                // comment) — only a real navigation does, which this
+                // forces.
+                <a
+                  href={`/review#${id}`}
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
                   Not yet reviewed
-                </Link>
+                </a>
               )}
             </dd>
           </div>

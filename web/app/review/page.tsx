@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getGroupCandidates, getReviewQueueGroups } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import {
@@ -58,14 +59,23 @@ export default async function ReviewPage() {
         {items.map((item) => (
           <div
             key={item.groupId}
-            className="flex flex-col gap-4 rounded-lg bg-zinc-100 p-4 sm:flex-row dark:bg-zinc-900"
+            id={item.groupId}
+            // target: highlights the card when linked to as /review#<id>
+            // (see app/groups/[id]/page.tsx's "Not yet reviewed" link) —
+            // the browser both scrolls to and applies :target for
+            // whichever element's id matches the URL fragment, no JS
+            // needed. scroll-mt-4 keeps it from landing flush against
+            // the viewport edge.
+            className="flex scroll-mt-4 flex-col gap-4 rounded-lg bg-zinc-100 p-4 ring-blue-500 target:ring-2 sm:flex-row dark:bg-zinc-900"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
-            <img
-              src={item.thumbUrl}
-              alt=""
-              className="h-40 w-40 flex-shrink-0 rounded-md object-cover"
-            />
+            <Link href={`/groups/${item.groupId}`} className="flex-shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL */}
+              <img
+                src={item.thumbUrl}
+                alt=""
+                className="h-40 w-40 rounded-md object-cover"
+              />
+            </Link>
 
             <div className="flex-1 space-y-2">
               {!hasValidGps(item.gpsLat, item.gpsLng) && (
