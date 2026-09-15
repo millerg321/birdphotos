@@ -1,0 +1,66 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { buildFilterUrl, type GalleryFilters } from "@/lib/galleryFilters";
+
+export interface SpeciesOption {
+  slug: string;
+  commonName: string;
+}
+
+export function GalleryFilterBar({
+  species,
+  current,
+}: {
+  species: SpeciesOption[];
+  current: GalleryFilters;
+}) {
+  const router = useRouter();
+  const hasActiveFilter = !!(current.species || current.from || current.to);
+
+  function update(updates: GalleryFilters) {
+    router.push(buildFilterUrl(current, updates));
+  }
+
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-2 text-sm">
+      <select
+        value={current.species ?? ""}
+        onChange={(e) => update({ species: e.target.value || null })}
+        aria-label="Filter by species"
+        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
+      >
+        <option value="">All species</option>
+        {species.map((s) => (
+          <option key={s.slug} value={s.slug}>
+            {s.commonName}
+          </option>
+        ))}
+      </select>
+      <input
+        type="date"
+        value={current.from ?? ""}
+        onChange={(e) => update({ from: e.target.value || null })}
+        aria-label="From date"
+        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
+      />
+      <span className="text-zinc-500">to</span>
+      <input
+        type="date"
+        value={current.to ?? ""}
+        onChange={(e) => update({ to: e.target.value || null })}
+        aria-label="To date"
+        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
+      />
+      {hasActiveFilter && (
+        <button
+          type="button"
+          onClick={() => update({ species: null, from: null, to: null })}
+          className="text-zinc-500 hover:underline"
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
+  );
+}

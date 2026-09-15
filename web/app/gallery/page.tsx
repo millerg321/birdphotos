@@ -1,8 +1,14 @@
 import Link from "next/link";
-import { getGalleryGroups, getUnreviewedGalleryCount } from "@/lib/db/queries";
+import {
+  getConfirmedSpeciesList,
+  getGalleryGroups,
+  getUnreviewedGalleryCount,
+} from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
 import { hasValidGps } from "@/lib/formatExif";
 import { auth } from "@/lib/auth";
+import { GalleryFilterBar } from "@/components/GalleryFilterBar";
+import { buildFilterUrl } from "@/lib/galleryFilters";
 
 // Next can't see the DB query or presigned-URL generation as "dynamic"
 // data (neither is a fetch() call), so without this it gets prerendered
@@ -23,17 +29,30 @@ export const dynamic = "force-dynamic";
 export default async function GalleryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; species?: string; from?: string; to?: string }>;
 }) {
   const session = await auth();
   const isOwner = !!session?.user?.email;
 
-  const { filter } = await searchParams;
-  const isUnreviewedFilter = isOwner && filter === "unreviewed";
+  const params = await searchParams;
+  const isUnreviewedFilter = isOwner && params.filter === "unreviewed";
+  const currentFilters = {
+    filter: isUnreviewedFilter ? "unreviewed" : null,
+    species: params.species ?? null,
+    from: params.from ?? null,
+    to: params.to ?? null,
+  };
+  const hasActiveFilter = !!(currentFilters.species || currentFilters.from || currentFilters.to);
 
-  const [groups, unreviewedCount] = await Promise.all([
-    getGalleryGroups(isUnreviewedFilter ? "unreviewed" : undefined),
+  const [groups, unreviewedCount, speciesList] = await Promise.all([
+    getGalleryGroups({
+      unreviewed: isUnreviewedFilter,
+      speciesSlug: params.species,
+      from: params.from,
+      to: params.to,
+    }),
     isOwner ? getUnreviewedGalleryCount() : Promise.resolve(0),
+    getConfirmedSpeciesList(),
   ]);
   const cards = await Promise.all(
     groups.map(async (group) => ({
@@ -58,9 +77,9 @@ export default async function GalleryPage({
         )}
       </div>
       {isOwner && (
-        <div className="mb-6 flex gap-4 text-sm">
+        <div className="mb-4 flex gap-4 text-sm">
           <Link
-            href="/gallery"
+            href={buildFilterUrl(currentFilters, { filter: null })}
             className={
               isUnreviewedFilter
                 ? "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
@@ -70,7 +89,7 @@ export default async function GalleryPage({
             All
           </Link>
           <Link
-            href="/gallery?filter=unreviewed"
+            href={buildFilterUrl(currentFilters, { filter: "unreviewed" })}
             className={
               isUnreviewedFilter
                 ? "font-medium text-black dark:text-zinc-50"
@@ -81,6 +100,7 @@ export default async function GalleryPage({
           </Link>
         </div>
       )}
+      <GalleryFilterBar species={speciesList} current={currentFilters} />
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {cards.map((card) => {
           const speciesLabel = card.speciesCommonName ?? card.speciesRawLabel ?? "Unreviewed";
@@ -124,7 +144,11 @@ export default async function GalleryPage({
       </div>
       {cards.length === 0 && (
         <p className="text-zinc-500">
-          {isUnreviewedFilter ? "Nothing needs review." : "No photos yet."}
+          {hasActiveFilter
+            ? "No photos match these filters."
+            : isUnreviewedFilter
+              ? "Nothing needs review."
+              : "No photos yet."}
         </p>
       )}
     </main>

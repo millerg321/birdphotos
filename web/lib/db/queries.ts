@@ -6,6 +6,13 @@ import { db } from "./client";
 // override always wins over the computed best shot (see plan: Data Model).
 const EFFECTIVE_BEST_SHOT = sql<boolean>`coalesce(bg.best_shot_override_photo_id, bg.best_shot_photo_id) = p.id`;
 
+export interface GalleryGroupsFilter {
+  unreviewed?: boolean;
+  speciesSlug?: string;
+  from?: string;
+  to?: string;
+}
+
 // Enriched for the gallery cards: confirmed species (null on both
 // fields means unreviewed — same meaning as getConfirmedCandidate
 // returning null, just bulk-fetched here instead of per-group), photo
@@ -13,11 +20,14 @@ const EFFECTIVE_BEST_SHOT = sql<boolean>`coalesce(bg.best_shot_override_photo_id
 // page applies hasValidGps + locationName itself, same as the group
 // detail page, rather than duplicating that decision here).
 //
-// filter: "unreviewed" restricts to groups with no confirmed species —
+// filter.unreviewed restricts to groups with no confirmed species —
 // the exact same condition that makes a card show "Unreviewed" in the
 // first place, so the toggle only ever hides cards already labeled
 // that way, never something inconsistent with what's on screen.
-export async function getGalleryGroups(filter?: "unreviewed") {
+// filter.speciesSlug/from/to are independent and combine with AND (and
+// with unreviewed, though a group with a confirmed species obviously
+// never matches both) — see plan: gallery filtering.
+export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
   let query = db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
@@ -30,6 +40,7 @@ export async function getGalleryGroups(filter?: "unreviewed") {
           .select([
             "bgs.burst_group_id",
             "s.common_name as commonName",
+            "s.slug as speciesSlug",
             "bgs.raw_label as rawLabel",
           ])
           .where("bgs.status", "=", "confirmed")
@@ -63,18 +74,47 @@ export async function getGalleryGroups(filter?: "unreviewed") {
         .as("photoCount"),
     ]);
 
-  if (filter === "unreviewed") {
+  if (filter.unreviewed) {
     query = query.where("confirmed.burst_group_id", "is", null);
+  }
+  if (filter.speciesSlug) {
+    query = query.where("confirmed.speciesSlug", "=", filter.speciesSlug);
+  }
+  if (filter.from) {
+    query = query.where("p.taken_at", ">=", new Date(filter.from));
+  }
+  if (filter.to) {
+    // Inclusive of the whole "to" day, not just midnight at its start.
+    const to = new Date(filter.to);
+    to.setDate(to.getDate() + 1);
+    query = query.where("p.taken_at", "<", to);
   }
 
   return query.orderBy("p.taken_at", "desc").execute();
 }
 
+// Powers the species filter dropdown (see plan: gallery filtering) —
+// only species with an actual matched Species row (i.e. bgs.species_id
+// is set), same scope as everywhere else a "which species" identity is
+// needed; a manually-tagged candidate with no match has no slug to
+// filter by and just isn't offered as a filter option.
+export async function getConfirmedSpeciesList() {
+  return db
+    .selectFrom("burst_group_species as bgs")
+    .innerJoin("species as s", "s.id", "bgs.species_id")
+    .where("bgs.status", "=", "confirmed")
+    .select(["s.slug", "s.common_name as commonName"])
+    .distinct()
+    .orderBy("s.common_name")
+    .execute();
+}
+
 // Powers the gallery's "Needs review (N)" toggle label regardless of
 // which tab is currently active — same "no confirmed candidate"
-// condition as getGalleryGroups's filter and getReviewQueueGroups,
-// kept as its own cheap count rather than requiring a second full
-// getGalleryGroups("unreviewed") fetch just to read cards.length.
+// condition as getGalleryGroups's unreviewed filter and
+// getReviewQueueGroups, kept as its own cheap count rather than
+// requiring a second full getGalleryGroups({ unreviewed: true }) fetch
+// just to read cards.length.
 export async function getUnreviewedGalleryCount(): Promise<number> {
   const row = await db
     .selectFrom("burst_groups as bg")
