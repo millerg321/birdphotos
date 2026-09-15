@@ -18,8 +18,14 @@ export function GalleryFilterBar({
   const router = useRouter();
   const hasActiveFilter = !!(current.species || current.from || current.to);
 
+  // Every control in this component changes what's shown, so every call
+  // resets page back to 1 (see plan: gallery pagination) — otherwise
+  // changing a filter while on, say, page 3 could land on an empty or
+  // unrelated page 3 of the new result set. Done here once rather than
+  // in each individual onChange below, so a future control can't forget
+  // it.
   function update(updates: GalleryFilters) {
-    router.push(buildFilterUrl(current, updates));
+    router.push(buildFilterUrl(current, { ...updates, page: null }));
   }
 
   return (

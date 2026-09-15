@@ -4,6 +4,7 @@ export interface GalleryFilters {
   from?: string | null;
   to?: string | null;
   sort?: string | null;
+  page?: string | null;
 }
 
 // Kept out of GalleryFilterBar.tsx deliberately: that file is "use
@@ -32,4 +33,13 @@ export function buildFilterUrl(current: GalleryFilters, updates: GalleryFilters)
   }
   const query = params.toString();
   return query ? `/gallery?${query}` : "/gallery";
+}
+
+// Clamps a requested page into [1, totalPages] — see plan: gallery
+// pagination. A stale bookmark/link after the library shrinks, or a
+// hand-edited ?page=, should never show an empty or out-of-range page;
+// totalPages itself is always at least 1 (an empty result set is still
+// "page 1 of 1", not "page 1 of 0").
+export function clampPage(requested: number, totalPages: number): number {
+  return Math.min(Math.max(requested, 1), Math.max(totalPages, 1));
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFilterUrl } from "./galleryFilters";
+import { buildFilterUrl, clampPage } from "./galleryFilters";
 
 describe("buildFilterUrl", () => {
   it("returns the bare path with no active filters", () => {
@@ -45,5 +45,25 @@ describe("buildFilterUrl", () => {
     // ordered," not "what's shown."
     expect(buildFilterUrl(current, { species: null })).toBe("/gallery?sort=sharpest");
     expect(buildFilterUrl(current, { sort: null })).toBe("/gallery?species=eurasian-blue-tit");
+  });
+});
+
+describe("clampPage", () => {
+  it("passes a valid page through unchanged", () => {
+    expect(clampPage(2, 3)).toBe(2);
+  });
+
+  it("clamps below 1 up to 1", () => {
+    expect(clampPage(0, 3)).toBe(1);
+    expect(clampPage(-5, 3)).toBe(1);
+  });
+
+  it("clamps above the last page down to it", () => {
+    expect(clampPage(99, 3)).toBe(3);
+  });
+
+  it("treats an empty result set as page 1 of 1, not 1 of 0", () => {
+    expect(clampPage(1, 0)).toBe(1);
+    expect(clampPage(5, 0)).toBe(1);
   });
 });

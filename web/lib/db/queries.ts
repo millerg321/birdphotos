@@ -14,21 +14,27 @@ export interface GalleryGroupsFilter {
   sort?: "newest" | "oldest" | "sharpest" | "most-photos";
 }
 
-// Enriched for the gallery cards: confirmed species (null on both
-// fields means unreviewed — same meaning as getConfirmedCandidate
-// returning null, just bulk-fetched here instead of per-group), photo
-// count (for the burst-count badge), and raw GPS/location fields (the
-// page applies hasValidGps + locationName itself, same as the group
-// detail page, rather than duplicating that decision here).
+// See plan: gallery pagination — a round number, not tied to the grid's
+// column counts at each breakpoint (grid-cols-2/3/4/5 in GalleryGrid.tsx);
+// the last page not filling a full row is fine, same as the unpaginated
+// gallery's last row never guaranteed one either.
+export const GALLERY_PAGE_SIZE = 30;
+
+// The joins + WHERE clauses shared by getGalleryGroups (a page of results)
+// and getGalleryGroupsCount (how many total, to compute page count) — kept
+// as one function so the two can never drift apart on what "matches this
+// filter" means. Deliberately stops before .select()/.orderBy(): those
+// differ between the two callers (columns needed vs. just a count; sort
+// order is meaningless for a count).
 //
-// filter.unreviewed restricts to groups with no confirmed species —
-// the exact same condition that makes a card show "Unreviewed" in the
-// first place, so the toggle only ever hides cards already labeled
-// that way, never something inconsistent with what's on screen.
-// filter.speciesSlug/from/to are independent and combine with AND (and
-// with unreviewed, though a group with a confirmed species obviously
-// never matches both) — see plan: gallery filtering.
-export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
+// filter.unreviewed restricts to groups with no confirmed species — the
+// exact same condition that makes a card show "Unreviewed" in the first
+// place, so the toggle only ever hides cards already labeled that way,
+// never something inconsistent with what's on screen. filter.speciesSlug/
+// from/to are independent and combine with AND (and with unreviewed,
+// though a group with a confirmed species obviously never matches both)
+// — see plan: gallery filtering.
+function galleryGroupsBaseQuery(filter: GalleryGroupsFilter) {
   let query = db
     .selectFrom("burst_groups as bg")
     .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
@@ -56,24 +62,7 @@ export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
           .orderBy("bgs.reviewed_at", "desc")
           .as("confirmed"),
       (join) => join.onRef("confirmed.burst_group_id", "=", "bg.id"),
-    )
-    .select((eb) => [
-      "bg.id as groupId",
-      "p.id as photoId",
-      "p.r2_key_thumb as thumbKey",
-      "p.taken_at as takenAt",
-      "p.camera_model as cameraModel",
-      "p.gps_lat as gpsLat",
-      "p.gps_lng as gpsLng",
-      "l.name as locationName",
-      "confirmed.commonName as speciesCommonName",
-      "confirmed.rawLabel as speciesRawLabel",
-      eb
-        .selectFrom("photos as p2")
-        .select((eb2) => eb2.fn.countAll<number>().as("count"))
-        .whereRef("p2.burst_group_id", "=", "bg.id")
-        .as("photoCount"),
-    ]);
+    );
 
   if (filter.unreviewed) {
     query = query.where("confirmed.burst_group_id", "is", null);
@@ -90,6 +79,38 @@ export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
     to.setDate(to.getDate() + 1);
     query = query.where("p.taken_at", "<", to);
   }
+
+  return query;
+}
+
+// Enriched for the gallery cards: confirmed species (null on both
+// fields means unreviewed — same meaning as getConfirmedCandidate
+// returning null, just bulk-fetched here instead of per-group), photo
+// count (for the burst-count badge), and raw GPS/location fields (the
+// page applies hasValidGps + locationName itself, same as the group
+// detail page, rather than duplicating that decision here).
+export async function getGalleryGroups(
+  filter: GalleryGroupsFilter = {},
+  page = 1,
+  pageSize = GALLERY_PAGE_SIZE,
+) {
+  let query = galleryGroupsBaseQuery(filter).select((eb) => [
+    "bg.id as groupId",
+    "p.id as photoId",
+    "p.r2_key_thumb as thumbKey",
+    "p.taken_at as takenAt",
+    "p.camera_model as cameraModel",
+    "p.gps_lat as gpsLat",
+    "p.gps_lng as gpsLng",
+    "l.name as locationName",
+    "confirmed.commonName as speciesCommonName",
+    "confirmed.rawLabel as speciesRawLabel",
+    eb
+      .selectFrom("photos as p2")
+      .select((eb2) => eb2.fn.countAll<number>().as("count"))
+      .whereRef("p2.burst_group_id", "=", "bg.id")
+      .as("photoCount"),
+  ]);
 
   switch (filter.sort) {
     case "oldest":
@@ -112,7 +133,19 @@ export async function getGalleryGroups(filter: GalleryGroupsFilter = {}) {
       query = query.orderBy("p.taken_at", "desc");
   }
 
-  return query.execute();
+  return query
+    .limit(pageSize)
+    .offset((page - 1) * pageSize)
+    .execute();
+}
+
+// Total matching groups for `filter`, ignoring page/pageSize — used to
+// compute how many pages there are (see plan: gallery pagination).
+export async function getGalleryGroupsCount(filter: GalleryGroupsFilter = {}): Promise<number> {
+  const row = await galleryGroupsBaseQuery(filter)
+    .select((eb) => eb.fn.countAll<number>().as("count"))
+    .executeTakeFirst();
+  return row?.count ?? 0;
 }
 
 // Powers the gallery lightbox's lazy-loaded larger image (see plan:

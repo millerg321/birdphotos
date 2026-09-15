@@ -1,7 +1,9 @@
 import Link from "next/link";
 import {
+  GALLERY_PAGE_SIZE,
   getConfirmedSpeciesList,
   getGalleryGroups,
+  getGalleryGroupsCount,
   getUnreviewedGalleryCount,
 } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
@@ -9,7 +11,7 @@ import { hasValidGps } from "@/lib/formatExif";
 import { auth } from "@/lib/auth";
 import { GalleryFilterBar } from "@/components/GalleryFilterBar";
 import { GalleryGrid } from "@/components/GalleryGrid";
-import { buildFilterUrl } from "@/lib/galleryFilters";
+import { buildFilterUrl, clampPage } from "@/lib/galleryFilters";
 
 // Next can't see the DB query or presigned-URL generation as "dynamic"
 // data (neither is a fetch() call), so without this it gets prerendered
@@ -42,6 +44,7 @@ export default async function GalleryPage({
     from?: string;
     to?: string;
     sort?: string;
+    page?: string;
   }>;
 }) {
   const session = await auth();
@@ -50,26 +53,36 @@ export default async function GalleryPage({
   const params = await searchParams;
   const isUnreviewedFilter = isOwner && params.filter === "unreviewed";
   const sort = isSortOption(params.sort) ? params.sort : undefined;
+  const filterArgs = {
+    unreviewed: isUnreviewedFilter,
+    speciesSlug: params.species,
+    from: params.from,
+    to: params.to,
+    sort,
+  };
+  const hasActiveFilter = !!(params.species || params.from || params.to);
+
+  const requestedPage = Number.parseInt(params.page ?? "1", 10);
+  const safeRequestedPage = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+
+  const [groupsCount, unreviewedCount, speciesList] = await Promise.all([
+    getGalleryGroupsCount(filterArgs),
+    isOwner ? getUnreviewedGalleryCount() : Promise.resolve(0),
+    getConfirmedSpeciesList(),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(groupsCount / GALLERY_PAGE_SIZE));
+  const page = clampPage(safeRequestedPage, totalPages);
+
   const currentFilters = {
     filter: isUnreviewedFilter ? "unreviewed" : null,
     species: params.species ?? null,
     from: params.from ?? null,
     to: params.to ?? null,
     sort: sort ?? null,
+    page: page > 1 ? String(page) : null,
   };
-  const hasActiveFilter = !!(currentFilters.species || currentFilters.from || currentFilters.to);
 
-  const [groups, unreviewedCount, speciesList] = await Promise.all([
-    getGalleryGroups({
-      unreviewed: isUnreviewedFilter,
-      speciesSlug: params.species,
-      from: params.from,
-      to: params.to,
-      sort,
-    }),
-    isOwner ? getUnreviewedGalleryCount() : Promise.resolve(0),
-    getConfirmedSpeciesList(),
-  ]);
+  const groups = await getGalleryGroups(filterArgs, page);
   const cards = await Promise.all(
     groups.map(async (group) => ({
       groupId: group.groupId,
@@ -101,7 +114,7 @@ export default async function GalleryPage({
       {isOwner && (
         <div className="mb-4 flex gap-4 text-sm">
           <Link
-            href={buildFilterUrl(currentFilters, { filter: null })}
+            href={buildFilterUrl(currentFilters, { filter: null, page: null })}
             className={
               isUnreviewedFilter
                 ? "text-zinc-500 hover:text-black dark:hover:text-zinc-50"
@@ -111,7 +124,7 @@ export default async function GalleryPage({
             All
           </Link>
           <Link
-            href={buildFilterUrl(currentFilters, { filter: "unreviewed" })}
+            href={buildFilterUrl(currentFilters, { filter: "unreviewed", page: null })}
             className={
               isUnreviewedFilter
                 ? "font-medium text-black dark:text-zinc-50"
@@ -132,6 +145,29 @@ export default async function GalleryPage({
               ? "Nothing needs review."
               : "No photos yet."}
         </p>
+      )}
+      {totalPages > 1 && (
+        <div className="mt-6 flex items-center justify-center gap-4 text-sm">
+          {page > 1 && (
+            <Link
+              href={buildFilterUrl(currentFilters, { page: page - 1 > 1 ? String(page - 1) : null })}
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              ← Previous
+            </Link>
+          )}
+          <span className="text-zinc-500">
+            Page {page} of {totalPages}
+          </span>
+          {page < totalPages && (
+            <Link
+              href={buildFilterUrl(currentFilters, { page: String(page + 1) })}
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Next →
+            </Link>
+          )}
+        </div>
       )}
     </main>
   );
