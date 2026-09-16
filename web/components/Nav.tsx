@@ -13,6 +13,7 @@ const OWNER_LINKS = [
   { href: "/gallery", label: "Gallery" },
   { href: "/species", label: "Species" },
   { href: "/map", label: "Map" },
+  { href: "/stats", label: "Stats" },
   { href: "/upload", label: "Upload" },
   { href: "/review", label: "Review" },
 ];

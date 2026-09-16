@@ -598,3 +598,76 @@ export async function reopenGroupForReview(groupId: string) {
     .where("burst_group_id", "=", groupId)
     .execute();
 }
+
+// Powers /stats' summary cards (see plan: Phase 5 — stats). Three
+// independent counts bundled into one call rather than three separate
+// exports, since the page always wants all three together and none
+// depends on the others.
+export interface StatsSummary {
+  totalSpecies: number;
+  totalPhotos: number;
+  totalSightings: number;
+}
+
+export async function getStatsSummary(): Promise<StatsSummary> {
+  const [speciesRow, photosRow, sightingsRow] = await Promise.all([
+    db
+      .selectFrom("burst_group_species")
+      .where("status", "=", "confirmed")
+      .select((eb) => eb.fn.count<number>("species_id").distinct().as("count"))
+      .executeTakeFirst(),
+    db
+      .selectFrom("photos")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst(),
+    db
+      .selectFrom("burst_groups")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst(),
+  ]);
+  return {
+    totalSpecies: Number(speciesRow?.count ?? 0),
+    totalPhotos: Number(photosRow?.count ?? 0),
+    totalSightings: Number(sightingsRow?.count ?? 0),
+  };
+}
+
+// Powers /stats' "most-photographed" list — same species+count shape as
+// getSpeciesIndex, just sorted by count and limited, no thumbnail
+// needed.
+export async function getTopSpeciesByCount(limit = 10) {
+  const rows = await db
+    .selectFrom("species as s")
+    .innerJoin("burst_group_species as bgs", (join) =>
+      join.onRef("bgs.species_id", "=", "s.id").on("bgs.status", "=", "confirmed"),
+    )
+    .select((eb) => [
+      "s.slug",
+      "s.common_name as commonName",
+      eb.fn.count<number>("bgs.burst_group_id").distinct().as("sightingCount"),
+    ])
+    .groupBy(["s.id"])
+    .orderBy((eb) => eb.fn.count("bgs.burst_group_id").distinct(), "desc")
+    .limit(limit)
+    .execute();
+  return rows.map((r) => ({ ...r, sightingCount: Number(r.sightingCount) }));
+}
+
+// Powers /stats' timeline — sightings (burst groups) per calendar month
+// of their best shot's taken_at, oldest first. `month` comes back as a
+// real JS Date (node-postgres parses timestamp columns, including this
+// raw date_trunc expression, the same as taken_at elsewhere in this
+// file — not the string the sql<> type parameter below merely asserts).
+export async function getSightingsTimeline() {
+  const rows = await db
+    .selectFrom("burst_groups as bg")
+    .innerJoin("photos as p", (join) => join.on((_eb) => EFFECTIVE_BEST_SHOT))
+    .select((eb) => [
+      sql<Date>`date_trunc('month', p.taken_at)`.as("month"),
+      eb.fn.countAll<number>().as("count"),
+    ])
+    .groupBy(sql`date_trunc('month', p.taken_at)`)
+    .orderBy(sql`date_trunc('month', p.taken_at)`)
+    .execute();
+  return rows.map((r) => ({ month: r.month, count: Number(r.count) }));
+}
