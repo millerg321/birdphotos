@@ -10,13 +10,15 @@ export interface SpeciesOption {
 
 export function GalleryFilterBar({
   species,
+  locations,
   current,
 }: {
   species: SpeciesOption[];
+  locations: string[];
   current: GalleryFilters;
 }) {
   const router = useRouter();
-  const hasActiveFilter = !!(current.species || current.from || current.to);
+  const hasActiveFilter = !!(current.species || current.location || current.from || current.to);
 
   // Every control in this component changes what's shown, so every call
   // resets page back to 1 (see plan: gallery pagination) — otherwise
@@ -40,6 +42,19 @@ export function GalleryFilterBar({
         {species.map((s) => (
           <option key={s.slug} value={s.slug}>
             {s.commonName}
+          </option>
+        ))}
+      </select>
+      <select
+        value={current.location ?? ""}
+        onChange={(e) => update({ location: e.target.value || null })}
+        aria-label="Filter by location"
+        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-black dark:border-zinc-700 dark:bg-black dark:text-zinc-50"
+      >
+        <option value="">All locations</option>
+        {locations.map((name) => (
+          <option key={name} value={name}>
+            {name}
           </option>
         ))}
       </select>
@@ -72,7 +87,7 @@ export function GalleryFilterBar({
       {hasActiveFilter && (
         <button
           type="button"
-          onClick={() => update({ species: null, from: null, to: null })}
+          onClick={() => update({ species: null, location: null, from: null, to: null })}
           className="text-zinc-500 hover:underline"
         >
           Clear filters

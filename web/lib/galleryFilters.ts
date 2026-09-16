@@ -1,6 +1,7 @@
 export interface GalleryFilters {
   filter?: string | null;
   species?: string | null;
+  location?: string | null;
   from?: string | null;
   to?: string | null;
   sort?: string | null;

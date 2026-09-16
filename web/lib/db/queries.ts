@@ -9,6 +9,7 @@ const EFFECTIVE_BEST_SHOT = sql<boolean>`coalesce(bg.best_shot_override_photo_id
 export interface GalleryGroupsFilter {
   unreviewed?: boolean;
   speciesSlug?: string;
+  location?: string;
   from?: string;
   to?: string;
   sort?: "newest" | "oldest" | "sharpest" | "most-photos";
@@ -31,9 +32,9 @@ export const GALLERY_PAGE_SIZE = 30;
 // exact same condition that makes a card show "Unreviewed" in the first
 // place, so the toggle only ever hides cards already labeled that way,
 // never something inconsistent with what's on screen. filter.speciesSlug/
-// from/to are independent and combine with AND (and with unreviewed,
-// though a group with a confirmed species obviously never matches both)
-// — see plan: gallery filtering.
+// location/from/to are independent and combine with AND (and with
+// unreviewed, though a group with a confirmed species obviously never
+// matches both) — see plan: gallery filtering.
 function galleryGroupsBaseQuery(filter: GalleryGroupsFilter) {
   let query = db
     .selectFrom("burst_groups as bg")
@@ -69,6 +70,9 @@ function galleryGroupsBaseQuery(filter: GalleryGroupsFilter) {
   }
   if (filter.speciesSlug) {
     query = query.where("confirmed.speciesSlug", "=", filter.speciesSlug);
+  }
+  if (filter.location) {
+    query = query.where("l.name", "=", filter.location);
   }
   if (filter.from) {
     query = query.where("p.taken_at", ">=", new Date(filter.from));

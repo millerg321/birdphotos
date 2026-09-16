@@ -4,6 +4,7 @@ import {
   getConfirmedSpeciesList,
   getGalleryGroups,
   getGalleryGroupsCount,
+  getKnownLocationNames,
   getUnreviewedGalleryCount,
 } from "@/lib/db/queries";
 import { getSignedImageUrl } from "@/lib/storage";
@@ -41,6 +42,7 @@ export default async function GalleryPage({
   searchParams: Promise<{
     filter?: string;
     species?: string;
+    location?: string;
     from?: string;
     to?: string;
     sort?: string;
@@ -56,19 +58,21 @@ export default async function GalleryPage({
   const filterArgs = {
     unreviewed: isUnreviewedFilter,
     speciesSlug: params.species,
+    location: params.location,
     from: params.from,
     to: params.to,
     sort,
   };
-  const hasActiveFilter = !!(params.species || params.from || params.to);
+  const hasActiveFilter = !!(params.species || params.location || params.from || params.to);
 
   const requestedPage = Number.parseInt(params.page ?? "1", 10);
   const safeRequestedPage = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
-  const [groupsCount, unreviewedCount, speciesList] = await Promise.all([
+  const [groupsCount, unreviewedCount, speciesList, locationList] = await Promise.all([
     getGalleryGroupsCount(filterArgs),
     isOwner ? getUnreviewedGalleryCount() : Promise.resolve(0),
     getConfirmedSpeciesList(),
+    getKnownLocationNames(),
   ]);
   const totalPages = Math.max(1, Math.ceil(groupsCount / GALLERY_PAGE_SIZE));
   const page = clampPage(safeRequestedPage, totalPages);
@@ -76,6 +80,7 @@ export default async function GalleryPage({
   const currentFilters = {
     filter: isUnreviewedFilter ? "unreviewed" : null,
     species: params.species ?? null,
+    location: params.location ?? null,
     from: params.from ?? null,
     to: params.to ?? null,
     sort: sort ?? null,
@@ -135,7 +140,7 @@ export default async function GalleryPage({
           </Link>
         </div>
       )}
-      <GalleryFilterBar species={speciesList} current={currentFilters} />
+      <GalleryFilterBar species={speciesList} locations={locationList} current={currentFilters} />
       <GalleryGrid cards={cards} isOwner={isOwner} />
       {cards.length === 0 && (
         <p className="text-zinc-500">
