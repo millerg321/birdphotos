@@ -150,7 +150,6 @@ export function IdentifyForm({ knownLocations }: { knownLocations: string[] }) {
         <input
           type="file"
           accept="image/*"
-          capture="environment"
           disabled={submitting}
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
