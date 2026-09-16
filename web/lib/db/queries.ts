@@ -186,6 +186,54 @@ export async function getConfirmedSpeciesList() {
     .execute();
 }
 
+// Powers the /species index (see plan: Phase 5 — species pages). Same
+// "must have a matched Species row" scope as getConfirmedSpeciesList
+// above, plus a sighting count and a representative thumbnail (the most
+// recently taken confirmed sighting's best-shot photo) per species. The
+// thumbnail is a correlated subquery, the same shape as getGalleryGroups'
+// photoCount — written out against bg2/p2 aliases rather than reusing
+// EFFECTIVE_BEST_SHOT, since that constant is hardcoded to the bare
+// bg/p aliases used elsewhere in this file.
+export async function getSpeciesIndex() {
+  return db
+    .selectFrom("species as s")
+    .innerJoin("burst_group_species as bgs", (join) =>
+      join.onRef("bgs.species_id", "=", "s.id").on("bgs.status", "=", "confirmed"),
+    )
+    .select((eb) => [
+      "s.slug",
+      "s.common_name as commonName",
+      "s.scientific_name as scientificName",
+      eb.fn.count<number>("bgs.burst_group_id").distinct().as("sightingCount"),
+      eb
+        .selectFrom("burst_group_species as bgs2")
+        .innerJoin("burst_groups as bg2", "bg2.id", "bgs2.burst_group_id")
+        .innerJoin("photos as p2", (join) =>
+          join.on(
+            (_eb) =>
+              sql<boolean>`coalesce(bg2.best_shot_override_photo_id, bg2.best_shot_photo_id) = p2.id`,
+          ),
+        )
+        .whereRef("bgs2.species_id", "=", "s.id")
+        .where("bgs2.status", "=", "confirmed")
+        .select("p2.r2_key_thumb")
+        .orderBy("p2.taken_at", "desc")
+        .limit(1)
+        .as("thumbKey"),
+    ])
+    .groupBy(["s.id"])
+    .orderBy("s.common_name")
+    .execute();
+}
+
+// Powers /species/[slug]'s header (see plan: Phase 5 — species pages) —
+// the sighting-history listing itself reuses getGalleryGroups/
+// getGalleryGroupsCount with speciesSlug set, rather than a dedicated
+// query, since that filter already exists and does exactly this.
+export async function getSpeciesBySlug(slug: string) {
+  return db.selectFrom("species").selectAll().where("slug", "=", slug).executeTakeFirst();
+}
+
 // Powers location autocomplete (see plan: location autocomplete) — the
 // `locations` table is small and barely changes (a personal library has
 // a handful to a few dozen distinct places, already deduplicated by name

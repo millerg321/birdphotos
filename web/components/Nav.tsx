@@ -5,11 +5,13 @@ import { usePathname } from "next/navigation";
 
 const PUBLIC_LINKS = [
   { href: "/gallery", label: "Gallery" },
+  { href: "/species", label: "Species" },
   { href: "/identify", label: "Identify" },
 ];
 
 const OWNER_LINKS = [
   { href: "/gallery", label: "Gallery" },
+  { href: "/species", label: "Species" },
   { href: "/upload", label: "Upload" },
   { href: "/review", label: "Review" },
 ];

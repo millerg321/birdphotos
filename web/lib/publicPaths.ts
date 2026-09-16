@@ -8,7 +8,18 @@
 // the request through at all. /identify's own API route
 // (/api/identify) additionally rate-limits and cost-caps, since unlike
 // every other public path here it triggers a real Anthropic API call.
-const PUBLIC_PATHS = ["/login", "/api/auth", "/gallery", "/identify", "/api/identify"];
+// /species is public too (see plan: Phase 5 — species pages), a
+// shareable field guide of what's been seen. Its detail page still
+// calls auth() itself, same reason as /gallery — GalleryGrid's
+// owner-only badges/actions need to know isOwner.
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth",
+  "/gallery",
+  "/identify",
+  "/api/identify",
+  "/species",
+];
 
 export function isPublicPath(pathname: string): boolean {
   return (
