@@ -17,11 +17,14 @@
     "@upstash/ratelimit": "^2.1.0",
     "@upstash/redis": "^1.38.4",
     "kysely": "^0.29.5",
+    "maplibre-gl": "^6.10.0",
     "next": "16.3.4",
     "next-auth": "^5.0.0-beta.32",
     "pg": "^8.23.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-map-gl": "^8.1.3",
+    "supercluster": "^9.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -32,6 +35,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/supercluster": "^7.1.3",
     "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.4",

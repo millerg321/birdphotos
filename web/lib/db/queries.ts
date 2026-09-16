@@ -170,6 +170,29 @@ export async function getGroupMediumKey(groupId: string): Promise<string | null>
   return row?.mediumKey ?? null;
 }
 
+// Powers /map (see plan: Phase 5 — map). Reuses galleryGroupsBaseQuery
+// with no filter rather than duplicating its joins (the confirmed-
+// species subquery, in particular) — this is "every group, but only
+// ones with GPS coordinates on their best shot." The "is not null" SQL
+// filter alone doesn't catch the NaN GPS quirk (see hasValidGps's own
+// comment, lib/formatExif.ts) — the caller must still run results
+// through hasValidGps before treating a point as real.
+export async function getMapSightings() {
+  return galleryGroupsBaseQuery({})
+    .where("p.gps_lat", "is not", null)
+    .where("p.gps_lng", "is not", null)
+    .select([
+      "bg.id as groupId",
+      "p.r2_key_thumb as thumbKey",
+      "p.taken_at as takenAt",
+      "p.gps_lat as gpsLat",
+      "p.gps_lng as gpsLng",
+      "confirmed.commonName as speciesCommonName",
+      "confirmed.rawLabel as speciesRawLabel",
+    ])
+    .execute();
+}
+
 // Powers the species filter dropdown (see plan: gallery filtering) —
 // only species with an actual matched Species row (i.e. bgs.species_id
 // is set), same scope as everywhere else a "which species" identity is
