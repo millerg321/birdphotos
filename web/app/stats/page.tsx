@@ -1,5 +1,23 @@
 import Link from "next/link";
 import { getSightingsTimeline, getStatsSummary, getTopSpeciesByCount } from "@/lib/db/queries";
+import { buildFilterUrl } from "@/lib/galleryFilters";
+
+// Local (not UTC) date parts, matching how the month is already
+// displayed (t.month.toLocaleDateString below) and how the gallery's
+// own from/to <input type="date"> filters already produce plain
+// "YYYY-MM-DD" strings with no timezone info — see galleryGroupsBaseQuery
+// in lib/db/queries.ts, which parses filter.from/to the same way either
+// source arrives.
+function monthDateRange(month: Date): { from: string; to: string } {
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return {
+    from: `${year}-${pad(monthIndex + 1)}-01`,
+    to: `${year}-${pad(monthIndex + 1)}-${pad(lastDay)}`,
+  };
+}
 
 // Owner-only (see plan: Phase 5 — stats) — not in lib/publicPaths.ts, so
 // the proxy blocks anonymous access the same way /map is. These are
@@ -69,20 +87,28 @@ export default async function StatsPage() {
           <p className="text-zinc-500">No sightings yet.</p>
         ) : (
           <ul className="space-y-2">
-            {timeline.map((t) => (
-              <li key={t.month.toISOString()} className="flex items-center gap-3 text-sm">
-                <span className="w-24 shrink-0 text-black dark:text-zinc-50">
-                  {t.month.toLocaleDateString(undefined, { month: "short", year: "numeric" })}
-                </span>
-                <span className="h-4 flex-1 overflow-hidden rounded bg-zinc-200 dark:bg-zinc-800">
-                  <span
-                    className="block h-full rounded bg-blue-600"
-                    style={{ width: `${(t.count / maxTimelineCount) * 100}%` }}
-                  />
-                </span>
-                <span className="w-8 shrink-0 text-right text-zinc-500">{t.count}</span>
-              </li>
-            ))}
+            {timeline.map((t) => {
+              const { from, to } = monthDateRange(t.month);
+              return (
+                <li key={t.month.toISOString()}>
+                  <Link
+                    href={buildFilterUrl({}, { from, to })}
+                    className="flex items-center gap-3 text-sm hover:underline"
+                  >
+                    <span className="w-24 shrink-0 text-black dark:text-zinc-50">
+                      {t.month.toLocaleDateString(undefined, { month: "short", year: "numeric" })}
+                    </span>
+                    <span className="h-4 flex-1 overflow-hidden rounded bg-zinc-200 dark:bg-zinc-800">
+                      <span
+                        className="block h-full rounded bg-blue-600"
+                        style={{ width: `${(t.count / maxTimelineCount) * 100}%` }}
+                      />
+                    </span>
+                    <span className="w-8 shrink-0 text-right text-zinc-500">{t.count}</span>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
