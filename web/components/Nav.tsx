@@ -29,7 +29,10 @@ const OWNER_LINKS = [
 // Review links that just bounce them to /login (see lib/publicPaths.ts).
 export function Nav({ isOwner }: { isOwner: boolean }) {
   const pathname = usePathname();
-  if (pathname === "/login") {
+  // /s/[token] (see plan: Phase 6 — sharing) is a standalone public view
+  // handed to strangers — no app chrome to navigate with, same reasoning
+  // as hiding this on /login.
+  if (pathname === "/login" || pathname?.startsWith("/s/")) {
     return null;
   }
 

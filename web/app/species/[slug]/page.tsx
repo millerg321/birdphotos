@@ -10,6 +10,7 @@ import { getSignedImageUrl } from "@/lib/storage";
 import { hasValidGps } from "@/lib/formatExif";
 import { auth } from "@/lib/auth";
 import { GalleryGrid } from "@/components/GalleryGrid";
+import { ShareButton } from "@/components/ShareButton";
 import { clampPage } from "@/lib/galleryFilters";
 
 // Same reasoning as app/gallery/page.tsx — presigned thumbnail URLs
@@ -64,16 +65,22 @@ export default async function SpeciesDetailPage({
       <Link href="/species" className="text-sm text-zinc-500 hover:underline">
         &larr; Back to species
       </Link>
-      <div className="mb-6 mt-2">
-        <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-          {species.common_name}
-        </h1>
-        {species.scientific_name && (
-          <p className="italic text-zinc-500">{species.scientific_name}</p>
-        )}
-        <p className="text-sm text-zinc-500">
-          {groupsCount} sighting{groupsCount === 1 ? "" : "s"}
-        </p>
+      <div className="mb-6 mt-2 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
+            {species.common_name}
+          </h1>
+          {species.scientific_name && (
+            <p className="italic text-zinc-500">{species.scientific_name}</p>
+          )}
+          <p className="text-sm text-zinc-500">
+            {groupsCount} sighting{groupsCount === 1 ? "" : "s"}
+          </p>
+        </div>
+        {/* Anonymous visitors can view this page (it's public) but
+            can't mint a link — createShareLinkAction requires a
+            session, so the button itself stays owner-only. */}
+        {isOwner && <ShareButton type="species" targetId={species.id} />}
       </div>
       <GalleryGrid cards={cards} isOwner={isOwner} />
       {totalPages > 1 && (

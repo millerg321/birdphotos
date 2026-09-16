@@ -20,6 +20,7 @@ import {
 import { wikipediaSearchUrl } from "@/lib/wikipedia";
 import { SubmitButton } from "@/components/SubmitButton";
 import { SetLocationForm } from "@/components/SetLocationForm";
+import { ShareButton } from "@/components/ShareButton";
 import { ConfirmButton } from "./ConfirmButton";
 
 // See app/gallery/page.tsx — same reasoning (presigned URL expiry, no
@@ -65,15 +66,18 @@ export default async function GroupDetailPage({
         <Link href="/gallery" className="text-sm text-zinc-500 hover:underline">
           &larr; Back to gallery
         </Link>
-        <form action={deleteGroupAction.bind(null, id)}>
-          <ConfirmButton
-            label="Delete this group"
-            confirmLabel="Confirm delete"
-            pendingLabel="Deleting…"
-            className="text-sm text-red-600 hover:underline dark:text-red-400"
-            confirmClassName="text-sm text-red-600 hover:underline dark:text-red-400"
-          />
-        </form>
+        <div className="flex items-center gap-4">
+          <ShareButton type="group" targetId={id} />
+          <form action={deleteGroupAction.bind(null, id)}>
+            <ConfirmButton
+              label="Delete this group"
+              confirmLabel="Confirm delete"
+              pendingLabel="Deleting…"
+              className="text-sm text-red-600 hover:underline dark:text-red-400"
+              confirmClassName="text-sm text-red-600 hover:underline dark:text-red-400"
+            />
+          </form>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-8 md:grid-cols-[2fr_1fr]">

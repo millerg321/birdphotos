@@ -257,6 +257,15 @@ export async function getSpeciesBySlug(slug: string) {
   return db.selectFrom("species").selectAll().where("slug", "=", slug).executeTakeFirst();
 }
 
+// Powers the species share view (see plan: Phase 6 — sharing) —
+// share_links.target_id stores the species UUID, not its slug, so the
+// public /s/[token] page needs a by-id lookup; its slug is then reused
+// to call the existing getGalleryGroups/getGalleryGroupsCount for the
+// sighting-history grid, same as /species/[slug] itself.
+export async function getSpeciesById(id: string) {
+  return db.selectFrom("species").selectAll().where("id", "=", id).executeTakeFirst();
+}
+
 // Powers location autocomplete (see plan: location autocomplete) — the
 // `locations` table is small and barely changes (a personal library has
 // a handful to a few dozen distinct places, already deduplicated by name
@@ -670,4 +679,58 @@ export async function getSightingsTimeline() {
     .orderBy(sql`date_trunc('month', p.taken_at)`)
     .execute();
   return rows.map((r) => ({ month: r.month, count: Number(r.count) }));
+}
+
+// Powers the "Share" button on /groups/[id] and /species/[slug] (see
+// plan: Phase 6 — sharing). Looks up an existing link for this
+// (type, target_id) pair first — repeated clicks return the same stable
+// URL rather than minting a new row every time — same "look up before
+// insert" shape as getOrCreateSpeciesId above. expires_at is always left
+// null here; there's no expiry-picker UI yet, though the column (and
+// this lookup) already support one being set later.
+export async function getOrCreateShareLink(
+  type: "group" | "species",
+  targetId: string,
+): Promise<string> {
+  const existing = await db
+    .selectFrom("share_links")
+    .select("token")
+    .where("type", "=", type)
+    .where("target_id", "=", targetId)
+    .executeTakeFirst();
+  if (existing) {
+    return existing.token;
+  }
+
+  const token = randomUUID();
+  await db
+    .insertInto("share_links")
+    .values({
+      id: randomUUID(),
+      token,
+      type,
+      target_id: targetId,
+      view_count: 0,
+    })
+    .execute();
+  return token;
+}
+
+// Powers /s/[token] (see plan: Phase 6 — sharing). Returns undefined for
+// an unknown token — the page itself decides that's a 404, not this
+// query (same division of responsibility as getSpeciesBySlug/
+// getGroupDetail, which return null/undefined rather than throwing).
+export async function getShareLinkByToken(token: string) {
+  return db.selectFrom("share_links").selectAll().where("token", "=", token).executeTakeFirst();
+}
+
+// Fire on every /s/[token] view (see plan: Phase 6 — sharing) — a plain
+// increment, not a read-then-write, so concurrent views can't clobber
+// each other's count.
+export async function incrementShareLinkViewCount(id: string): Promise<void> {
+  await db
+    .updateTable("share_links")
+    .set({ view_count: sql`view_count + 1` })
+    .where("id", "=", id)
+    .execute();
 }
